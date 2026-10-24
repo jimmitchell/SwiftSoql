@@ -51,12 +51,10 @@ enum BrowserLogin {
     static func logIn(host: String) async throws -> SavedLogin {
         guard let consumerKey else { throw BrowserLoginError("This copy of SwiftSoql wasn't built with a Salesforce consumer key.") }
         let host = normalizedHost(host)
-        guard isSalesforceHost(host) else {
-            throw BrowserLoginError("\(host) isn't a Salesforce login address. My Domains end in .my.salesforce.com.")
-        }
+
         let verifier = randomURLSafeString(bytes: 48)
         let challenge = base64URL(Data(SHA256.hash(data: Data(verifier.utf8))))
-        var authorize = URLComponents(string: "https://\(host)/services/oauth2/authorize")!
+        var authorize = URLComponents(url: try salesforceURL(host: host, path: "/services/oauth2/authorize"), resolvingAgainstBaseURL: false)!
         authorize.queryItems = [
             URLQueryItem(name: "response_type", value: "code"),
             URLQueryItem(name: "client_id", value: consumerKey),
@@ -130,9 +128,24 @@ enum BrowserLogin {
     private static let salesforceDomains = ["salesforce.com", "force.com", "cloudforce.com", "database.com",
                                             "salesforce.mil", "sfcrmproducts.cn", "sfcrmapps.cn"]
 
+    /// A bare hostname (letters, digits, dots and hyphens only) on one of Salesforce's domains.
     static func isSalesforceHost(_ host: String) -> Bool {
         let host = host.lowercased()
+        guard !host.isEmpty, host.allSatisfy({ ("a"..."z").contains($0) || ("0"..."9").contains($0) || $0 == "." || $0 == "-" }) else { return false }
         return salesforceDomains.contains { host == $0 || host.hasSuffix("." + $0) }
+    }
+
+    /// An https URL for a path on a Salesforce host, built from parts so the host can't spill into
+    /// the path, and checked with the same parser that will send the request.
+    static func salesforceURL(host: String, path: String) throws -> URL {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = host
+        components.path = path
+        guard isSalesforceHost(host), let url = components.url, isSalesforceURL(url), url.host() == host else {
+            throw BrowserLoginError("\(host) isn't a Salesforce login address. My Domains end in .my.salesforce.com.")
+        }
+        return url
     }
 
     /// An https URL on one of Salesforce's domains, which is safe to send an access token to.
@@ -175,8 +188,7 @@ enum BrowserLogin {
     }
 
     private static func tokenRequest(host: String, form: [String: String]) async throws -> JSONValue {
-        guard isSalesforceHost(host) else { throw BrowserLoginError("\(host) isn't a Salesforce login address.") }
-        var request = URLRequest(url: URL(string: "https://\(host)/services/oauth2/token")!)
+        var request = URLRequest(url: try salesforceURL(host: host, path: "/services/oauth2/token"))
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         var body = URLComponents()

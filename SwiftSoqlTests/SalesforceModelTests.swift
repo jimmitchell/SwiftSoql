@@ -154,5 +154,11 @@ struct BrowserLoginTests {
             #expect(!BrowserLogin.isSalesforceURL(try #require(URL(string: bad))), "\(bad)")
         }
         #expect(BrowserLogin.normalizedHost(" https://Acme.My.Salesforce.com/ ") == "acme.my.salesforce.com")
+        for host in ["evil.com/x.salesforce.com", "evil.com?x.salesforce.com", "evil.com#.salesforce.com", "user@evil.com.salesforce.com:1@x",
+                     "evil.com\\.salesforce.com", "evil.com%2F.salesforce.com", "evil.com .salesforce.com", ""] {
+            #expect(!BrowserLogin.isSalesforceHost(host), "\(host)")
+            #expect(throws: BrowserLoginError.self) { try BrowserLogin.salesforceURL(host: host, path: "/services/oauth2/token") }
+        }
+        #expect(try BrowserLogin.salesforceURL(host: "acme.my.salesforce.com", path: "/services/oauth2/token").absoluteString == "https://acme.my.salesforce.com/services/oauth2/token")
     }
 }
