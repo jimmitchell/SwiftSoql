@@ -173,6 +173,7 @@ struct SettingsView: View {
     @AppStorage("skipCompoundFieldsInGeneratedQueries") private var skipCompoundFields = false
     @AppStorage("maxRecentQueries") private var maxRecentQueries = 25
     @AppStorage("describeAllInBackground") private var describeAllInBackground = true
+    @AppStorage(BrowserLogin.consumerKeySetting) private var consumerKey = ""
 
     var body: some View {
         Form {
@@ -186,6 +187,15 @@ struct SettingsView: View {
             Section("Generated Queries") {
                 Toggle("Sort fields alphabetically", isOn: $sortGeneratedFields)
                 Toggle("Use address parts instead of compound address fields", isOn: $skipCompoundFields)
+            }
+            Section("Browser Login") {
+                TextField("Consumer key", text: $consumerKey, prompt: Text("From your org's External Client App"))
+                    .font(.system(.body, design: .monospaced))
+                Text("Logging in with the browser needs an External Client App in your org, with the callback URL swiftsoql://oauth/callback. The Salesforce CLI's orgs work without it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Link("How to create the External Client App", destination: URL(string: "https://github.com/jimmitchell/SwiftSoql#logging-in-with-the-browser")!)
+                    .font(.caption)
             }
             Section("Schema") {
                 Toggle("Describe every SObject after connecting", isOn: $describeAllInBackground)

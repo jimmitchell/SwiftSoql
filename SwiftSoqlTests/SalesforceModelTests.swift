@@ -162,3 +162,22 @@ struct BrowserLoginTests {
         #expect(try BrowserLogin.salesforceURL(host: "acme.my.salesforce.com", path: "/services/oauth2/token").absoluteString == "https://acme.my.salesforce.com/services/oauth2/token")
     }
 }
+
+@Suite(.serialized)
+struct BrowserLoginKeyTests {
+    @Test func settingsKeyIsUsedAndTrimmed() {
+        defer { AppDefaults.store.removeObject(forKey: BrowserLogin.consumerKeySetting) }
+        AppDefaults.store.removeObject(forKey: BrowserLogin.consumerKeySetting)
+        #expect(BrowserLogin.consumerKey == nil, "The shipped app has no built-in key")
+        AppDefaults.store.set("  3MVGexample \n", forKey: BrowserLogin.consumerKeySetting)
+        #expect(BrowserLogin.consumerKey == "3MVGexample")
+        AppDefaults.store.set("   ", forKey: BrowserLogin.consumerKeySetting)
+        #expect(BrowserLogin.consumerKey == nil)
+    }
+
+    @Test func readsLoginsSavedBeforeKeysWereRemembered() throws {
+        let old = #"[{"username":"a@b.c","instanceURL":"https://x.my.salesforce.com","loginHost":"login.salesforce.com"}]"#
+        let logins = try JSONDecoder().decode([BrowserLogin.SavedLogin].self, from: Data(old.utf8))
+        #expect(logins.first?.username == "a@b.c" && logins.first?.consumerKey == nil)
+    }
+}

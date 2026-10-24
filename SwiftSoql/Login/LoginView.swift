@@ -16,9 +16,7 @@ struct LoginView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Connect to Salesforce")
                     .font(.title2.weight(.semibold))
-                Text(BrowserLogin.consumerKey == nil
-                     ? "Choose an org you've logged in to with the Salesforce CLI."
-                     : "Choose an org you've logged in to with the Salesforce CLI or in the browser, or log in to another.")
+                Text("Choose an org you've logged in to with the Salesforce CLI or in the browser, or log in to another.")
                     .foregroundStyle(.secondary)
             }
 
@@ -83,10 +81,8 @@ struct LoginView: View {
                     Text(model.statusText).foregroundStyle(.secondary)
                 }
                 Spacer()
-                if BrowserLogin.consumerKey != nil {
-                    Button("Log In with Browser…") { isLoggingIn = true }
-                        .disabled(model.isConnecting)
-                }
+                Button("Log In with Browser…") { isLoggingIn = true }
+                    .disabled(model.isConnecting)
                 Button("Connect") {
                     if let selection { connect(selection) }
                 }
@@ -200,6 +196,36 @@ private struct BrowserLoginSheet: View {
     }
 
     var body: some View {
+        if BrowserLogin.consumerKey == nil {
+            needsKey
+        } else {
+            form
+        }
+    }
+
+    /// Browser login needs the consumer key of an External Client App in the user's org.
+    private var needsKey: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Log In with Browser").font(.headline)
+            Text("To log in without the Salesforce CLI, SwiftSoql needs the consumer key of an External Client App in your org. An admin creates one in Setup, then you add its key in SwiftSoql's Settings.")
+                .fixedSize(horizontal: false, vertical: true)
+            Link("How to create the External Client App", destination: URL(string: "https://github.com/jimmitchell/SwiftSoql#logging-in-with-the-browser")!)
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                SettingsLink {
+                    Text("Open Settings…")
+                }
+                .keyboardShortcut(.defaultAction)
+                .simultaneousGesture(TapGesture().onEnded { dismiss() })
+            }
+        }
+        .padding(20)
+        .frame(width: 420)
+    }
+
+    private var form: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Log In with Browser").font(.headline)
             Picker("Log in to", selection: $kind) {

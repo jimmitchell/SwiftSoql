@@ -7,9 +7,9 @@
 	<string>https://github.com/jimmitchell/SwiftSoql/releases/latest/download/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>Dzdhb/kwHxFz4yMyDKG/O549Yg1905YIVpZcLXiwq74=</string>
-	<!-- The consumer key of the Salesforce External Client App used for browser login. Leave
-	     empty to offer only the orgs the Salesforce CLI knows. -->
+	<!-- A consumer key for browser login built into the app, for an External Client App packaged
+	     for every org. Empty: users enter their own org's key in Settings. -->
 	<key>SalesforceConsumerKey</key>
-	<string>3MVG94YrNIs0WS4c9bIGVN0Al7RP3mpHxTmybuIlAUTB1XYA2zrGEWmgSNJyGnjraKxFyUbnqW2rKEh_dK3Ds</string>
+	<string></string>
 </dict>
 </plist>

@@ -6,24 +6,33 @@ import Security
 /// Logging in to Salesforce in the browser instead of through the Salesforce CLI.
 ///
 /// Uses the OAuth web server flow with PKCE, so the app needs only the consumer key of a
-/// Salesforce External Client App (SalesforceConsumerKey in Info.plist), not a secret. Refresh
-/// tokens are kept in the Keychain; the list of logins (username, instance and login host) is
-/// kept in the app's settings.
+/// Salesforce External Client App, not a secret. A local External Client App only works for the
+/// org it was created in, so users enter their own app's key in Settings; a build can also carry
+/// one (SalesforceConsumerKey in Info.plist), for an app that's packaged for every org. Refresh
+/// tokens are kept in the Keychain; the list of logins (username, instance, login host and the key
+/// they were made with) is kept in the app's settings.
 enum BrowserLogin {
     static let redirectURI = "swiftsoql://oauth/callback"
     private static let keychainService = "org.jimmitchell.SwiftSoql.browser-login"
     private static let loginsKey = "browserLogins"
 
-    /// The External Client App's consumer key, if the app was built with one.
+    /// The settings key for a consumer key entered in Settings.
+    static let consumerKeySetting = "browserLoginConsumerKey"
+
+    /// The consumer key to log in with: the one entered in Settings, or else one built into the app.
     static var consumerKey: String? {
-        let key = (Bundle.main.object(forInfoDictionaryKey: "SalesforceConsumerKey") as? String)?.trimmingCharacters(in: .whitespaces)
-        return key?.isEmpty == false ? key : nil
+        for key in [AppDefaults.store.string(forKey: consumerKeySetting), Bundle.main.object(forInfoDictionaryKey: "SalesforceConsumerKey") as? String] {
+            if let key = key?.trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty { return key }
+        }
+        return nil
     }
 
     struct SavedLogin: Codable, Equatable {
         var username: String
         var instanceURL: String
         var loginHost: String
+        /// The key the login was made with; its refresh token only works with that key.
+        var consumerKey: String?
     }
 
     static var savedLogins: [SavedLogin] {
@@ -49,7 +58,7 @@ enum BrowserLogin {
     /// Opens Salesforce's login page for `host` (login.salesforce.com, test.salesforce.com or a
     /// My Domain), and saves the login once the user has approved access.
     static func logIn(host: String) async throws -> SavedLogin {
-        guard let consumerKey else { throw BrowserLoginError("This copy of SwiftSoql wasn't built with a Salesforce consumer key.") }
+        guard let consumerKey else { throw BrowserLoginError("Add your External Client App's consumer key in Settings first.") }
         let host = normalizedHost(host)
 
         let verifier = randomURLSafeString(bytes: 48)
@@ -86,15 +95,18 @@ enum BrowserLogin {
         let identity = try await getJSON(identityURL, accessToken: accessToken)
         guard let username = identity["username"]?.string else { throw BrowserLoginError("Salesforce didn't say which user logged in.") }
         try storeRefreshToken(refreshToken, for: username)
-        let login = SavedLogin(username: username, instanceURL: instanceURL, loginHost: host)
+        let login = SavedLogin(username: username, instanceURL: instanceURL, loginHost: host, consumerKey: consumerKey)
         save(savedLogins.filter { $0.username != username } + [login])
         return login
     }
 
     /// A fresh session for a saved login, using its refresh token.
     static func session(for username: String) async throws -> OrgSession {
-        guard let consumerKey, let login = savedLogins.first(where: { $0.username == username }) else {
+        guard let login = savedLogins.first(where: { $0.username == username }) else {
             throw BrowserLoginError("There's no saved browser login for \(username).")
+        }
+        guard let consumerKey = login.consumerKey ?? consumerKey else {
+            throw BrowserLoginError("Add your External Client App's consumer key in Settings, then log in again.")
         }
         guard let refreshToken = refreshToken(for: username) else {
             throw BrowserLoginError("The saved login for \(username) is missing from the Keychain. Log in again.")
