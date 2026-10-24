@@ -83,7 +83,22 @@ struct LoginView: View {
         }
         .padding(20)
         .frame(minWidth: 640, minHeight: 360)
-        .task { await loadOrgs() }
+        .task {
+            await loadOrgs()
+            connectFromLaunchArgument()
+        }
+    }
+
+    /// `-connect <alias or username>` on the command line connects the first window straight away.
+    private static var launchArgumentHandled = false
+
+    private func connectFromLaunchArgument() {
+        guard !Self.launchArgumentHandled, let target = UserDefaults.standard.string(forKey: "connect") else { return }
+        Self.launchArgumentHandled = true
+        if let org = orgs.first(where: { $0.alias == target || $0.username == target }) {
+            selection = org.id
+            connect(org.id)
+        }
     }
 
     private func loadOrgs() async {

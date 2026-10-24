@@ -208,11 +208,18 @@ private nonisolated struct JSONParser {
                 case UInt8(ascii: "t"): out.append(0x09)
                 case UInt8(ascii: "u"):
                     var scalar = try parseHex4()
+                    // Combine a surrogate pair only when the next escape is a valid low surrogate;
+                    // a lone surrogate becomes U+FFFD and any following escape is parsed on its own.
                     if (0xD800...0xDBFF).contains(scalar),
-                       pos + 1 < bytes.count, bytes[pos] == UInt8(ascii: "\\"), bytes[pos + 1] == UInt8(ascii: "u") {
+                       pos + 5 < bytes.count, bytes[pos] == UInt8(ascii: "\\"), bytes[pos + 1] == UInt8(ascii: "u") {
+                        let saved = pos
                         pos += 2
                         let low = try parseHex4()
-                        scalar = 0x10000 + ((scalar - 0xD800) << 10) + (low - 0xDC00)
+                        if (0xDC00...0xDFFF).contains(low) {
+                            scalar = 0x10000 + ((scalar - 0xD800) << 10) + (low - 0xDC00)
+                        } else {
+                            pos = saved
+                        }
                     }
                     out.append(contentsOf: String(Unicode.Scalar(scalar) ?? "\u{FFFD}").utf8)
                 default:
