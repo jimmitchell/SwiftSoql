@@ -59,6 +59,7 @@ struct ExplorerView: View {
             }
         }
         .focusedSceneValue(\.explorerModel, model)
+        .background(ToolbarDisplayModeKeeper())
         .modifier(CodeFileHandling(model: model))
         .inspector(isPresented: $showInspector) {
             InspectorPanel(model: model)

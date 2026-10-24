@@ -230,4 +230,23 @@ final class SwiftSoqlUITests: XCTestCase {
         XCTAssertTrue(sheet.buttons["Log In"].isEnabled)
         sheet.buttons["Cancel"].click()
     }
+
+    /// The toolbar's display mode, chosen from its context menu, is still in effect after a
+    /// relaunch.
+    @MainActor
+    func testToolbarDisplayModeSurvivesRelaunch() throws {
+        try XCTSkipIf(testOrg == nil, "Set SWIFTSOQL_TEST_ORG to run this test")
+        try launch()
+        let iconsOnlyHeight = app.windows.firstMatch.toolbars.firstMatch.frame.height
+        app.windows.firstMatch.toolbars.firstMatch.rightClick()
+        app.menuItems["Icon and Text"].click()
+        let withTextHeight = app.windows.firstMatch.toolbars.firstMatch.frame.height
+        XCTAssertGreaterThan(withTextHeight, iconsOnlyHeight, "Showing text makes the toolbar taller")
+        app.terminate()
+
+        try launch(extraArguments: ["-KeepTestingSettings", "YES"])
+        let toolbar = app.windows.firstMatch.toolbars.firstMatch
+        XCTAssertTrue(toolbar.waitForExistence(timeout: 10))
+        XCTAssertEqual(toolbar.frame.height, withTextHeight, "After a relaunch the toolbar should still show icons and text")
+    }
 }
