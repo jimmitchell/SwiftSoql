@@ -1,0 +1,126 @@
+import Foundation
+
+/// Where to connect and with which token.
+nonisolated struct OrgSession: Sendable {
+    var username: String
+    var alias: String?
+    var instanceURL: URL
+    var apiVersion: String
+    var accessToken: String
+
+    var displayName: String { alias ?? username }
+}
+
+/// An error returned by the Salesforce REST API.
+nonisolated struct SalesforceError: LocalizedError {
+    let statusCode: Int
+    let errorCode: String
+    let message: String
+
+    var errorDescription: String? {
+        errorCode.isEmpty || message.contains(errorCode) ? message : "\(errorCode): \(message)"
+    }
+
+    var isInvalidSession: Bool {
+        statusCode == 401 || errorCode == "INVALID_SESSION_ID"
+    }
+}
+
+/// A minimal async client for the Salesforce REST API.
+///
+/// When the access token expires it asks `reauthenticate` for a fresh session once,
+/// then retries the request.
+actor SalesforceClient {
+    private(set) var session: OrgSession
+    private let reauthenticate: @Sendable () async throws -> OrgSession
+    private let urlSession: URLSession
+
+    /// The latest "used/limit" daily API request count, from the Sforce-Limit-Info header.
+    private(set) var apiUsage: String?
+
+    init(session: OrgSession, reauthenticate: @escaping @Sendable () async throws -> OrgSession) {
+        self.session = session
+        self.reauthenticate = reauthenticate
+        self.urlSession = URLSession(configuration: .ephemeral)
+    }
+
+    private var dataPath: String { "/services/data/v\(session.apiVersion)" }
+
+    func describeGlobal() async throws -> [GlobalSObject] {
+        let json = try await get("\(dataPath)/sobjects")
+        return (json["sobjects"]?.array ?? []).compactMap { $0.object.map(GlobalSObject.init) }
+    }
+
+    func describe(_ sobject: String) async throws -> SObjectDescribe {
+        let name = sobject.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? sobject
+        let json = try await get("\(dataPath)/sobjects/\(name)/describe")
+        guard let obj = json.object else {
+            throw SalesforceError(statusCode: 200, errorCode: "", message: "Unexpected describe response for \(sobject)")
+        }
+        return SObjectDescribe(json: obj)
+    }
+
+    /// Runs a SOQL query, or a SOSL search if the text starts with FIND.
+    func query(_ soql: String, includeDeleted: Bool = false) async throws -> QueryResult {
+        let q = [URLQueryItem(name: "q", value: soql)]
+        if soql.lowercased().hasPrefix("find ") {
+            return QueryResult(searchResponse: try await get("\(dataPath)/search", query: q))
+        }
+        return QueryResult(json: try await get("\(dataPath)/\(includeDeleted ? "queryAll" : "query")", query: q))
+    }
+
+    /// Fetches the next batch of a query, given the `nextRecordsUrl` of the previous batch.
+    func queryMore(_ nextRecordsURL: String) async throws -> QueryResult {
+        QueryResult(json: try await get(nextRecordsURL))
+    }
+
+    func get(_ path: String, query: [URLQueryItem] = []) async throws -> JSONValue {
+        do {
+            return try await send(path: path, query: query)
+        } catch let error as SalesforceError where error.isInvalidSession {
+            session = try await reauthenticate()
+            return try await send(path: path, query: query)
+        }
+    }
+
+    private func send(path: String, query: [URLQueryItem]) async throws -> JSONValue {
+        guard var components = URLComponents(url: session.instanceURL, resolvingAgainstBaseURL: false) else {
+            throw URLError(.badURL)
+        }
+        components.path = path
+        components.queryItems = query.isEmpty ? nil : query
+        // SOQL can contain '+', which URLComponents leaves alone but servers decode as a space.
+        components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+        guard let url = components.url else { throw URLError(.badURL) }
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await urlSession.data(for: request)
+        let http = response as? HTTPURLResponse
+        if let limitInfo = http?.value(forHTTPHeaderField: "Sforce-Limit-Info"),
+           let usage = limitInfo.split(separator: ",").first(where: { $0.hasPrefix("api-usage=") }) {
+            apiUsage = String(usage.dropFirst("api-usage=".count))
+        }
+        let status = http?.statusCode ?? 0
+        let json = data.isEmpty ? JSONValue.null : try? JSONValue.parse(data)
+        guard (200..<300).contains(status) else {
+            throw Self.error(from: json, status: status, data: data)
+        }
+        guard let json else {
+            throw SalesforceError(statusCode: status, errorCode: "", message: "Salesforce returned a response that isn't valid JSON.")
+        }
+        return json
+    }
+
+    private static func error(from json: JSONValue?, status: Int, data: Data) -> SalesforceError {
+        // Errors are usually [{"message": "...", "errorCode": "..."}].
+        let first = json?.array?.first ?? json
+        if let message = first?["message"]?.string {
+            return SalesforceError(statusCode: status, errorCode: first?["errorCode"]?.string ?? "", message: message)
+        }
+        let body = String(decoding: data.prefix(500), as: UTF8.self)
+        return SalesforceError(statusCode: status, errorCode: "HTTP \(status)", message: body.isEmpty ? "HTTP \(status)" : body)
+    }
+}
