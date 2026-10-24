@@ -38,17 +38,26 @@ struct QueryCommands: Commands {
 
     var body: some Commands {
         CommandMenu("Query") {
-            Button("Run Query") {
-                Task { await model?.runQuery() }
+            Button(model?.workspace == .apex ? "Execute Apex" : "Run Query") {
+                Task { await model?.run() }
             }
             .keyboardShortcut(.return, modifiers: .command)
-            .disabled(model?.isConnected != true || model?.isQuerying == true)
+            .disabled(model?.canRun != true)
 
             Button("Run Query Including Deleted Rows") {
                 Task { await model?.runQuery(includeDeleted: true) }
             }
             .keyboardShortcut(.return, modifiers: [.command, .shift])
-            .disabled(model?.isConnected != true || model?.isQuerying == true)
+            .disabled(model?.isConnected != true || model?.isQuerying == true || model?.workspace != .query)
+
+            Divider()
+
+            Picker("Workspace", selection: Binding { model?.workspace ?? .query } set: { model?.workspace = $0 }) {
+                Text("Query").tag(Workspace.query).keyboardShortcut("1", modifiers: .command)
+                Text("Anonymous Apex").tag(Workspace.apex).keyboardShortcut("2", modifiers: .command)
+            }
+            .pickerStyle(.inline)
+            .disabled(model?.isConnected != true)
 
             Divider()
 

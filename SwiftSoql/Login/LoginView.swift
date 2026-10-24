@@ -90,7 +90,7 @@ struct LoginView: View {
     }
 
     /// `-connect <alias or username>` on the command line connects the first window straight away,
-    /// and `-query <soql>` then runs a query.
+    /// and `-query <soql>` then runs a query, or `-executeApex <code>` runs anonymous Apex.
     private static var launchArgumentHandled = false
 
     private func connectFromLaunchArgument() {
@@ -104,6 +104,11 @@ struct LoginView: View {
             if model.isConnected, let query = defaults.string(forKey: "query") {
                 model.soql = query
                 await model.runQuery()
+            }
+            if model.isConnected, let apex = defaults.string(forKey: "executeApex") {
+                model.workspace = .apex
+                model.apex.code = apex
+                await model.executeApex()
             }
         }
     }

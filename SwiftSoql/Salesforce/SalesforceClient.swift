@@ -105,6 +105,26 @@ actor SalesforceClient {
         return (json.array ?? []).map(SaveResult.init)
     }
 
+    /// Runs anonymous Apex and returns the outcome with its debug log.
+    func executeAnonymous(_ code: String, logLevels: [ApexLogCategory: ApexLogLevel]) async throws -> ApexExecution {
+        do {
+            return try await executeAnonymousOnce(code, logLevels: logLevels)
+        } catch let error as SalesforceError where error.isInvalidSession {
+            session = try await reauthenticate()
+            return try await executeAnonymousOnce(code, logLevels: logLevels)
+        }
+    }
+
+    private func executeAnonymousOnce(_ code: String, logLevels: [ApexLogCategory: ApexLogLevel]) async throws -> ApexExecution {
+        var request = URLRequest(url: session.instanceURL.appending(path: "services/Soap/s/\(session.apiVersion)"))
+        request.httpMethod = "POST"
+        request.setValue("text/xml; charset=UTF-8", forHTTPHeaderField: "Content-Type")
+        request.setValue("\"\"", forHTTPHeaderField: "SOAPAction")
+        request.httpBody = Data(AnonymousApex.request(code: code, sessionID: session.accessToken, logLevels: logLevels).utf8)
+        let (data, response) = try await urlSession.data(for: request)
+        return try AnonymousApex.execution(fromResponse: data, code: code, status: (response as? HTTPURLResponse)?.statusCode ?? 0)
+    }
+
     func get(_ path: String, query: [URLQueryItem] = []) async throws -> JSONValue {
         try await send("GET", path, query: query)
     }

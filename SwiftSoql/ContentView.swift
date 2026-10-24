@@ -33,7 +33,10 @@ struct ExplorerView: View {
             }
             .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 500)
         } detail: {
-            QueryWorkspace(model: model)
+            switch model.workspace {
+            case .query: QueryWorkspace(model: model)
+            case .apex: ApexWorkspace(model: model)
+            }
         }
         .focusedSceneValue(\.explorerModel, model)
         .inspector(isPresented: $showInspector) {
@@ -48,6 +51,15 @@ struct ExplorerView: View {
                     Label("Disconnect", systemImage: "eject")
                 }
                 .help("Disconnect and choose another org")
+            }
+            ToolbarItem(placement: .principal) {
+                Picker("Workspace", selection: $model.workspace) {
+                    ForEach(Workspace.allCases) { workspace in
+                        Text(workspace.rawValue).tag(workspace)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .help("Switch between running queries and anonymous Apex")
             }
             ToolbarItem {
                 Button {

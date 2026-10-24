@@ -4,8 +4,7 @@ import SwiftUI
 /// The SOQL editor, with syntax highlighting, error checking against the org's schema, and
 /// completions.
 ///
-/// Wraps an NSTextView so smart quotes, dashes and autocorrect can be turned off; they would
-/// otherwise corrupt queries as they're typed.
+/// Wraps an NSTextView so smart quotes, dashes and autocorrect can be turned off.
 struct SOQLEditor: NSViewRepresentable {
     @Binding var text: String
     /// Supplies describes for checking the query and for completions.
@@ -25,19 +24,7 @@ struct SOQLEditor: NSViewRepresentable {
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.textContainer?.widthTracksTextView = true
         textView.delegate = context.coordinator
-        textView.isRichText = false
-        textView.allowsUndo = true
-        textView.usesFindBar = true
-        textView.isIncrementalSearchingEnabled = true
-        textView.isAutomaticQuoteSubstitutionEnabled = false
-        textView.isAutomaticDashSubstitutionEnabled = false
-        textView.isAutomaticTextReplacementEnabled = false
-        textView.isAutomaticSpellingCorrectionEnabled = false
-        textView.isAutomaticTextCompletionEnabled = false
-        textView.isContinuousSpellCheckingEnabled = false
-        textView.isGrammarCheckingEnabled = false
-        textView.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
-        textView.textContainerInset = NSSize(width: 4, height: 6)
+        textView.configureForCode()
         textView.completionsProvider = { [weak coordinator = context.coordinator] range in
             coordinator?.completions.completions(in: range) ?? []
         }

@@ -25,6 +25,14 @@ enum SchemaItem: Hashable {
     }
 }
 
+/// What the main area of an explorer window shows.
+enum Workspace: String, CaseIterable, Identifiable {
+    case query = "Query"
+    case apex = "Apex"
+
+    var id: String { rawValue }
+}
+
 /// The state of one explorer window, which is connected to at most one org.
 @Observable
 final class ExplorerModel {
@@ -63,7 +71,34 @@ final class ExplorerModel {
     @ObservationIgnored private var pendingSchemaObjects: Set<String> = []
     @ObservationIgnored private var sobjectNames: Set<String> = []
 
+    // Anonymous Apex
+    var workspace = Workspace.query
+    let apex = ApexModel()
+
     var isConnected: Bool { client != nil }
+
+    /// Whether the Run command can run what the current workspace shows.
+    var canRun: Bool {
+        isConnected && (workspace == .query ? !isQuerying : !apex.isRunning)
+    }
+
+    /// Runs the query or the anonymous Apex, depending on the workspace.
+    func run(includeDeleted: Bool = false) async {
+        switch workspace {
+        case .query: await runQuery(includeDeleted: includeDeleted)
+        case .apex: await executeApex()
+        }
+    }
+
+    func executeApex() async {
+        guard let client else { return }
+        do {
+            try await apex.execute(using: client)
+        } catch {
+            self.error = DisplayedError("Unable to run Apex", error)
+        }
+        await refreshAPIUsage()
+    }
 
     func connect(to org: SFOrg) async {
         isConnecting = true
@@ -106,6 +141,7 @@ final class ExplorerModel {
         sobjectNames = []
         statusText = ""
         apiUsage = nil
+        apex.clearRuns()
     }
 
     func refreshAPIUsage() async {
