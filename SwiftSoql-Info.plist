@@ -10,6 +10,6 @@
 	<!-- The consumer key of the Salesforce External Client App used for browser login. Leave
 	     empty to offer only the orgs the Salesforce CLI knows. -->
 	<key>SalesforceConsumerKey</key>
-	<string></string>
+	<string>3MVG94YrNIs0WS4c9bIGVN0Al7RP3mpHxTmybuIlAUTB1XYA2zrGEWmgSNJyGnjraKxFyUbnqW2rKEh_dK3Ds</string>
 </dict>
 </plist>
