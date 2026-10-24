@@ -118,6 +118,12 @@ struct QueryCommands: Commands {
             .pickerStyle(.inline)
             .disabled(model?.isConnected != true)
 
+            Button("Format Query") {
+                model?.formatQuery()
+            }
+            .keyboardShortcut("i", modifiers: .control)
+            .disabled(model?.isConnected != true || model?.workspace != .query)
+
             Button("Show Query Plan") {
                 Task { await model?.explainQuery() }
             }

@@ -363,6 +363,16 @@ final class ExplorerModel {
         await refreshAPIUsage()
     }
 
+    /// Lays the current tab's query out on several lines. Only whitespace changes, and Undo
+    /// puts it back.
+    func formatQuery() {
+        if let formatted = SoqlFormatter.format(soql) {
+            soql = formatted
+        } else {
+            currentTab.statusText = "Only SOQL queries can be formatted, and this one couldn't be read."
+        }
+    }
+
     /// Shows how Salesforce would run the current tab's query, without running it.
     func explainQuery() async {
         let tab = currentTab

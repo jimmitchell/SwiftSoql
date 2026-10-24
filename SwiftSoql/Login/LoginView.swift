@@ -90,7 +90,8 @@ struct LoginView: View {
     }
 
     /// `-connect <alias or username>` on the command line connects the first window straight away,
-    /// and `-query <soql>` then runs a query, `-executeApex <code>` runs anonymous Apex, `-explainQuery <soql>` shows a query plan, and
+    /// and `-query <soql>` then runs a query, `-executeApex <code>` runs anonymous Apex, `-explainQuery <soql>` shows a query plan, `-formatQuery YES`
+    /// formats the query, and
     /// `-showSchema <sobject>` shows its schema diagram.
     private static var launchArgumentHandled = false
 
@@ -105,6 +106,9 @@ struct LoginView: View {
             if model.isConnected, let query = defaults.string(forKey: "query") {
                 model.soql = query
                 await model.runQuery()
+            }
+            if model.isConnected, defaults.bool(forKey: "formatQuery") {
+                model.formatQuery()
             }
             if model.isConnected, let query = defaults.string(forKey: "explainQuery") {
                 model.soql = query
