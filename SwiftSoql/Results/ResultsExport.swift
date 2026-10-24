@@ -7,7 +7,7 @@ enum ResultsExport {
     static func csv(_ resultSet: ResultSet) -> String {
         var lines = [resultSet.columns.map(quoted).joined(separator: ",")]
         for row in resultSet.rows {
-            lines.append(resultSet.columns.map { quoted(text(row.record, column: $0)) }.joined(separator: ","))
+            lines.append(resultSet.columns.map { quoted(csvText(row.record, column: $0)) }.joined(separator: ","))
         }
         return lines.joined(separator: "\r\n") + "\r\n"
     }
@@ -29,6 +29,17 @@ enum ResultsExport {
             return "[\(child.totalSize) child rows]"
         }
         return value.displayText ?? ""
+    }
+
+    /// Like `text`, but text values that a spreadsheet would treat as a formula get a leading
+    /// apostrophe, so record data can't run formulas when the file is opened in Excel or Numbers.
+    /// Numbers are left alone, so negative values stay numeric.
+    private static func csvText(_ record: JSONObject, column: String) -> String {
+        let value = text(record, column: column)
+        guard case .string = record.value(atPath: column.split(separator: ".")),
+              let first = value.unicodeScalars.first, "=+-@\t\r".unicodeScalars.contains(first)
+        else { return value }
+        return "'" + value
     }
 
     private static func quoted(_ s: String) -> String {
