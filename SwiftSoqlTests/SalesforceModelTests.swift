@@ -142,3 +142,17 @@ struct QueryPlanTests {
         #expect(plan.notes == ["Not considering filter for optimization because unindexed (IsDeleted)"])
     }
 }
+
+struct BrowserLoginTests {
+    @Test func onlySalesforceServersGetTokens() throws {
+        for good in ["https://login.salesforce.com/id/00D/005", "https://acme.my.salesforce.com", "https://acme--dev.sandbox.my.salesforce.com",
+                     "https://acme.lightning.force.com", "https://test.salesforce.com", "https://acme.my.salesforce.mil"] {
+            #expect(BrowserLogin.isSalesforceURL(try #require(URL(string: good))), "\(good)")
+        }
+        for bad in ["http://login.salesforce.com", "https://evil.com", "https://salesforce.com.evil.com", "https://evilsalesforce.com",
+                    "https://login.salesforce.com@evil.com", "file:///etc/passwd"] {
+            #expect(!BrowserLogin.isSalesforceURL(try #require(URL(string: bad))), "\(bad)")
+        }
+        #expect(BrowserLogin.normalizedHost(" https://Acme.My.Salesforce.com/ ") == "acme.my.salesforce.com")
+    }
+}

@@ -51,6 +51,9 @@ enum BrowserLogin {
     static func logIn(host: String) async throws -> SavedLogin {
         guard let consumerKey else { throw BrowserLoginError("This copy of SwiftSoql wasn't built with a Salesforce consumer key.") }
         let host = normalizedHost(host)
+        guard isSalesforceHost(host) else {
+            throw BrowserLoginError("\(host) isn't a Salesforce login address. My Domains end in .my.salesforce.com.")
+        }
         let verifier = randomURLSafeString(bytes: 48)
         let challenge = base64URL(Data(SHA256.hash(data: Data(verifier.utf8))))
         var authorize = URLComponents(string: "https://\(host)/services/oauth2/authorize")!
@@ -77,6 +80,10 @@ enum BrowserLogin {
         guard let accessToken = token["access_token"]?.string, let refreshToken = token["refresh_token"]?.string,
               let instanceURL = token["instance_url"]?.string, let identityURL = token["id"]?.string.flatMap(URL.init(string:)) else {
             throw BrowserLoginError("Salesforce's response didn't include a refresh token. Check that the External Client App allows the refresh_token scope.")
+        }
+        // The access token only goes to Salesforce's own servers.
+        guard isSalesforceURL(identityURL), let instance = URL(string: instanceURL), isSalesforceURL(instance) else {
+            throw BrowserLoginError("Salesforce's response pointed outside Salesforce, so the login was stopped.")
         }
         let identity = try await getJSON(identityURL, accessToken: accessToken)
         guard let username = identity["username"]?.string else { throw BrowserLoginError("Salesforce didn't say which user logged in.") }
@@ -108,6 +115,9 @@ enum BrowserLogin {
               let instanceURL = URL(string: token["instance_url"]?.string ?? login.instanceURL) else {
             throw BrowserLoginError("Salesforce didn't return an access token.")
         }
+        guard isSalesforceURL(instanceURL) else {
+            throw BrowserLoginError("Salesforce's response pointed outside Salesforce, so the login was stopped.")
+        }
         // Use the newest API version the org supports.
         let versions = try await getJSON(instanceURL.appending(path: "services/data"), accessToken: accessToken)
         let apiVersion = versions.array?.last?["version"]?.string ?? "62.0"
@@ -115,6 +125,20 @@ enum BrowserLogin {
     }
 
     // MARK: Helpers
+
+    /// Salesforce's domains, including its government and China clouds.
+    private static let salesforceDomains = ["salesforce.com", "force.com", "cloudforce.com", "database.com",
+                                            "salesforce.mil", "sfcrmproducts.cn", "sfcrmapps.cn"]
+
+    static func isSalesforceHost(_ host: String) -> Bool {
+        let host = host.lowercased()
+        return salesforceDomains.contains { host == $0 || host.hasSuffix("." + $0) }
+    }
+
+    /// An https URL on one of Salesforce's domains, which is safe to send an access token to.
+    static func isSalesforceURL(_ url: URL) -> Bool {
+        url.scheme?.lowercased() == "https" && isSalesforceHost(url.host() ?? "")
+    }
 
     /// Accepts "mydomain.my.salesforce.com", "https://mydomain.my.salesforce.com/" and so on.
     static func normalizedHost(_ text: String) -> String {
@@ -151,6 +175,7 @@ enum BrowserLogin {
     }
 
     private static func tokenRequest(host: String, form: [String: String]) async throws -> JSONValue {
+        guard isSalesforceHost(host) else { throw BrowserLoginError("\(host) isn't a Salesforce login address.") }
         var request = URLRequest(url: URL(string: "https://\(host)/services/oauth2/token")!)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
