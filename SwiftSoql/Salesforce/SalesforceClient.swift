@@ -76,6 +76,37 @@ actor SalesforceClient {
         return SObjectDescribe(json: obj)
     }
 
+    /// The most SObjects `describe(batch:)` takes at once: the composite API's limit on subrequests.
+    static let describeBatchLimit = 25
+
+    /// Describes several SObjects in one request with the composite API, which counts as a single
+    /// API call. (The composite batch API counts each subrequest as a call.) Returns the
+    /// describes, and the names that Salesforce couldn't describe.
+    func describe(batch sobjects: [String]) async throws -> (describes: [SObjectDescribe], failed: [String]) {
+        let requests = sobjects.enumerated().map { i, name -> JSONValue in
+            var request = JSONObject()
+            request["method"] = .string("GET")
+            request["url"] = .string("\(dataPath)/sobjects/\(Self.pathEncoded(name))/describe")
+            request["referenceId"] = .string("describe\(i)")
+            return .object(request)
+        }
+        var body = JSONObject()
+        body["allOrNone"] = .bool(false)
+        body["compositeRequest"] = .array(requests)
+        let json = try await send("POST", "\(dataPath)/composite", body: .object(body))
+        var describes: [SObjectDescribe] = []
+        var failed: [String] = []
+        let results = json["compositeResponse"]?.array ?? []
+        for (i, name) in sobjects.enumerated() {
+            if i < results.count, results[i]["httpStatusCode"]?.int == 200, let obj = results[i]["body"]?.object {
+                describes.append(SObjectDescribe(json: obj))
+            } else {
+                failed.append(name)
+            }
+        }
+        return (describes, failed)
+    }
+
     /// Runs a SOQL query, or a SOSL search if the text starts with FIND.
     func query(_ soql: String, includeDeleted: Bool = false) async throws -> QueryResult {
         let q = [URLQueryItem(name: "q", value: soql)]

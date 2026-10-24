@@ -63,6 +63,11 @@ nonisolated struct JSONObject: Sendable, Equatable {
 
     init() {}
 
+    init(minimumCapacity: Int) {
+        keys.reserveCapacity(minimumCapacity)
+        storage.reserveCapacity(minimumCapacity)
+    }
+
     subscript(key: String) -> JSONValue? {
         get { storage[key] }
         set {
@@ -123,6 +128,15 @@ nonisolated extension JSONValue {
 private nonisolated struct JSONParser {
     let bytes: [UInt8]
     var pos = 0
+    /// Object keys seen so far. Records and describes repeat the same keys many times, so sharing
+    /// one copy of each saves memory for keys too long to be stored inline in a String.
+    private var keys: Set<String> = []
+
+    mutating func interned(_ key: String) -> String {
+        if let existing = keys.firstIndex(of: key) { return keys[existing] }
+        keys.insert(key)
+        return key
+    }
 
     init(bytes: [UInt8]) {
         self.bytes = bytes
@@ -171,7 +185,7 @@ private nonisolated struct JSONParser {
         while true {
             skipWhitespace()
             guard pos < bytes.count, bytes[pos] == UInt8(ascii: "\"") else { throw error("expected object key") }
-            let key = try parseString()
+            let key = interned(try parseString())
             skipWhitespace()
             guard pos < bytes.count, bytes[pos] == UInt8(ascii: ":") else { throw error("expected ':'") }
             pos += 1

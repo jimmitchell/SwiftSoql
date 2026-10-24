@@ -51,6 +51,9 @@ final class ExplorerModel {
     var expandedSObjects: Set<String> = []
     private var describes: [String: SObjectDescribe] = [:]
     private var describesInFlight: [String: Task<SObjectDescribe, Error>] = [:]
+    /// How far describing every SObject in the background has got, while it runs.
+    private(set) var backgroundDescribeProgress: (done: Int, total: Int)?
+    @ObservationIgnored private var backgroundDescribes: Task<Void, Never>?
 
     // Query
     var soql = UserDefaults.standard.string(forKey: "soql") ?? "SELECT Id, Name FROM Account"
@@ -136,6 +139,7 @@ final class ExplorerModel {
             sobjectNames = Set(sobjects.map { $0.name.lowercased() })
             statusText = "Connected, \(sobjects.count) SObject types"
             recentQueries = UserDefaults.standard.stringArray(forKey: recentQueriesKey) ?? []
+            startBackgroundDescribes()
             await refreshAPIUsage()
             UserDefaults.standard.set(username, forKey: "lastOrgUsername")
         } catch {
@@ -145,6 +149,9 @@ final class ExplorerModel {
     }
 
     func disconnect() {
+        backgroundDescribes?.cancel()
+        backgroundDescribes = nil
+        backgroundDescribeProgress = nil
         client = nil
         session = nil
         sobjects = []
@@ -198,6 +205,64 @@ final class ExplorerModel {
         } catch {
             self.error = DisplayedError("Unable to describe \(sobject)", error)
         }
+    }
+
+    /// Describes every SObject, a few batches at a time, so the sidebar filter can find fields in
+    /// all of them. SoqlXplorer does the same. Describes the UI asks for go ahead separately.
+    private func startBackgroundDescribes() {
+        backgroundDescribes?.cancel()
+        guard UserDefaults.standard.bool(forKey: "describeAllInBackground"), let client else { return }
+        backgroundDescribes = Task { await describeAll(using: client) }
+    }
+
+    private func describeAll(using client: SalesforceClient) async {
+        let names = sobjects.map(\.name)
+        var failures: [String: Int] = [:]
+        var batchSize = SalesforceClient.describeBatchLimit
+        func remaining() -> [String] {
+            names.filter { name in
+                let key = name.lowercased()
+                return describes[key] == nil && describesInFlight[key] == nil && failures[name, default: 0] < 3
+            }
+        }
+        var todo = remaining()
+        while !todo.isEmpty, !Task.isCancelled {
+            backgroundDescribeProgress = (names.count - todo.count, names.count)
+            let batches = stride(from: 0, to: min(todo.count, batchSize * 3), by: batchSize).map {
+                Array(todo[$0..<min($0 + batchSize, todo.count)])
+            }
+            await withTaskGroup(of: (batch: [String], result: Result<(describes: [SObjectDescribe], failed: [String]), Error>).self) { group in
+                for batch in batches {
+                    group.addTask {
+                        do {
+                            return (batch, .success(try await client.describe(batch: batch)))
+                        } catch {
+                            return (batch, .failure(error))
+                        }
+                    }
+                }
+                for await (batch, result) in group {
+                    switch result {
+                    case .success(let r):
+                        for describe in r.describes where describes[describe.name.lowercased()] == nil {
+                            describes[describe.name.lowercased()] = describe
+                        }
+                        for name in r.failed {
+                            failures[name] = 3
+                        }
+                    case .failure:
+                        // Try again in smaller batches, giving up on an SObject after a few failures.
+                        for name in batch {
+                            failures[name, default: 0] += 1
+                        }
+                        batchSize = max(1, batchSize / 2)
+                    }
+                }
+            }
+            await refreshAPIUsage()
+            todo = remaining()
+        }
+        backgroundDescribeProgress = nil
     }
 
     /// SObjects whose name, label, or (already described) field names match the filter.

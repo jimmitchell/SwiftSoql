@@ -37,6 +37,19 @@ struct SchemaSidebar: View {
                 Task { await model.ensureDescribed(item.sobjectName) }
             }
         }
+        .safeAreaInset(edge: .bottom) {
+            if let progress = model.backgroundDescribeProgress {
+                VStack(alignment: .leading, spacing: 4) {
+                    ProgressView(value: Double(progress.done), total: Double(max(progress.total, 1)))
+                    Text("Describing SObjects: \(progress.done) of \(progress.total)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .help("Fetching every SObject's fields so the filter can search them")
+            }
+        }
         .overlay {
             if sobjects.isEmpty && !model.schemaFilter.isEmpty {
                 ContentUnavailableView.search(text: model.schemaFilter)

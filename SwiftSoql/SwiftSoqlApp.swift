@@ -11,6 +11,7 @@ struct SwiftSoqlApp: App {
             "soqlPopupCompletions": true,
             "soqlUppercaseKeywords": true,
             "maxRecentQueries": 25,
+            "describeAllInBackground": true,
         ])
     }
 
@@ -117,6 +118,7 @@ struct SettingsView: View {
     @AppStorage("sortFieldsInGeneratedQueries") private var sortGeneratedFields = true
     @AppStorage("skipCompoundFieldsInGeneratedQueries") private var skipCompoundFields = false
     @AppStorage("maxRecentQueries") private var maxRecentQueries = 25
+    @AppStorage("describeAllInBackground") private var describeAllInBackground = true
 
     var body: some View {
         Form {
@@ -130,6 +132,12 @@ struct SettingsView: View {
             Section("Generated Queries") {
                 Toggle("Sort fields alphabetically", isOn: $sortGeneratedFields)
                 Toggle("Use address parts instead of compound address fields", isOn: $skipCompoundFields)
+            }
+            Section("Schema") {
+                Toggle("Describe every SObject after connecting", isOn: $describeAllInBackground)
+                Text("Lets the sidebar filter find fields in every SObject, at the cost of about one API request per 25 SObjects. Takes effect the next time you connect.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             Section("Recent Queries") {
                 Stepper("Remember the last \(maxRecentQueries) queries for each org", value: $maxRecentQueries, in: 5...200, step: 5)

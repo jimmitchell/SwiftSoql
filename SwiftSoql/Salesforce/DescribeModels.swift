@@ -18,6 +18,10 @@ nonisolated struct GlobalSObject: Sendable, Identifiable, Hashable {
 }
 
 /// The full describe of an SObject type. The raw JSON is kept for the details inspector.
+///
+/// Every SObject in an org can be described, so the fields' and child relationships' properties
+/// that are null, false or empty lists are dropped to save memory: a missing property reads the
+/// same, and the inspector shows them all as blank.
 nonisolated struct SObjectDescribe: Sendable {
     let json: JSONObject
     let name: String
@@ -27,11 +31,31 @@ nonisolated struct SObjectDescribe: Sendable {
     let updateableFields: Set<String>
 
     init(json: JSONObject) {
+        var json = json
+        let fieldsJSON = (json["fields"]?.array ?? []).compactMap(\.object).map(Self.pruned)
+        let relationshipsJSON = (json["childRelationships"]?.array ?? []).compactMap(\.object).map(Self.pruned)
+        json["fields"] = .array(fieldsJSON.map(JSONValue.object))
+        json["childRelationships"] = .array(relationshipsJSON.map(JSONValue.object))
         self.json = json
         name = json["name"]?.string ?? ""
-        fields = (json["fields"]?.array ?? []).compactMap { $0.object.map(FieldDescribe.init) }
-        childRelationships = (json["childRelationships"]?.array ?? []).compactMap { $0.object.map(ChildRelationship.init) }
+        fields = fieldsJSON.map(FieldDescribe.init)
+        childRelationships = relationshipsJSON.map(ChildRelationship.init)
         updateableFields = Set(fields.filter(\.updateable).map(\.name))
+    }
+
+    private static func pruned(_ obj: JSONObject) -> JSONObject {
+        let kept = obj.keys.compactMap { key -> (String, JSONValue)? in
+            switch obj[key] {
+            case nil, .null, .bool(false): nil
+            case .array(let items) where items.isEmpty: nil
+            case let value?: (key, value)
+            }
+        }
+        var out = JSONObject(minimumCapacity: kept.count)
+        for (key, value) in kept {
+            out[key] = value
+        }
+        return out
     }
 
     func field(named name: String) -> FieldDescribe? {
