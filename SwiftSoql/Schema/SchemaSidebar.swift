@@ -18,6 +18,8 @@ struct SchemaSidebar: View {
             filter: model.schemaFilter,
             sortFields: sortFields,
             describe: { model.cachedDescribe($0) },
+            iconsVersion: model.icons.version,
+            icon: { model.icons.icon(for: $0) },
             isHighlighted: { model.fieldMatchesFilter($0) },
             onSelect: { model.schemaSelection = $0 },
             onExpand: { name, isExpanded in
@@ -70,6 +72,9 @@ private struct SchemaOutline: NSViewRepresentable {
     let filter: String
     let sortFields: Bool
     let describe: (String) -> SObjectDescribe?
+    /// Changes as SObject icons arrive.
+    let iconsVersion: Int
+    let icon: (String) -> NSImage?
     let isHighlighted: (FieldDescribe) -> Bool
     let onSelect: (SchemaItem?) -> Void
     let onExpand: (String, Bool) -> Void
@@ -151,6 +156,7 @@ private struct SchemaOutline: NSViewRepresentable {
         private var shownDescribed: Set<String> = []
         private var shownSort = false
         private var shownFilter = ""
+        private var shownIconsVersion = 0
         /// True while the outline is changed to match the model, so its delegate calls aren't echoed back.
         private var isSyncing = false
         private weak var outline: NSOutlineView?
@@ -186,6 +192,14 @@ private struct SchemaOutline: NSViewRepresentable {
             shownDescribed = parent.describedNames
             shownSort = parent.sortFields
             shownFilter = parent.filter
+            if parent.iconsVersion != shownIconsVersion {
+                shownIconsVersion = parent.iconsVersion
+                // Only the rows on screen need their new icons now; others get them as they appear.
+                let visible = outline.rows(in: outline.visibleRect)
+                if visible.length > 0 {
+                    outline.reloadData(forRowIndexes: IndexSet(integersIn: visible.location..<NSMaxRange(visible)), columnIndexes: [0])
+                }
+            }
 
             for node in nodes {
                 guard let name = node.item?.sobjectName else { continue }
@@ -255,7 +269,7 @@ private struct SchemaOutline: NSViewRepresentable {
             switch node.kind {
             case .sobject(let sobject):
                 let cell = outlineView.makeView(withIdentifier: SObjectCell.identifier, owner: nil) as? SObjectCell ?? SObjectCell()
-                cell.configure(sobject, isDescribed: parent.describedNames.contains(sobject.name))
+                cell.configure(sobject, isDescribed: parent.describedNames.contains(sobject.name), icon: parent.icon(sobject.name))
                 return cell
             case .field(_, let field):
                 let cell = outlineView.makeView(withIdentifier: FieldCell.identifier, owner: nil) as? FieldCell ?? FieldCell()
@@ -340,6 +354,7 @@ private final class SObjectCell: NSTableCellView {
         super.init(frame: .zero)
         identifier = Self.identifier
         let image = NSImageView()
+        image.imageScaling = .scaleProportionallyUpOrDown
         let text = NSTextField(labelWithString: "")
         text.lineBreakMode = .byTruncatingTail
         for v in [image, text] as [NSView] {
@@ -350,6 +365,7 @@ private final class SObjectCell: NSTableCellView {
             image.leadingAnchor.constraint(equalTo: leadingAnchor),
             image.centerYAnchor.constraint(equalTo: centerYAnchor),
             image.widthAnchor.constraint(equalToConstant: 18),
+            image.heightAnchor.constraint(equalToConstant: 18),
             text.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 5),
             text.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -2),
             text.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -362,11 +378,13 @@ private final class SObjectCell: NSTableCellView {
         fatalError("init(coder:) is not supported")
     }
 
-    func configure(_ sobject: GlobalSObject, isDescribed: Bool) {
+    func configure(_ sobject: GlobalSObject, isDescribed: Bool, icon: NSImage?) {
         textField?.stringValue = sobject.name
         textField?.textColor = isDescribed ? .labelColor : .secondaryLabelColor
-        imageView?.image = NSImage(systemSymbolName: sobject.custom ? "tablecells.badge.ellipsis" : "tablecells", accessibilityDescription: nil)
-        imageView?.contentTintColor = sobject.custom ? .systemOrange : .controlAccentColor
+        // The org's icon once it's loaded; until then, a symbol for standard or custom SObjects.
+        imageView?.image = icon ?? NSImage(systemSymbolName: sobject.custom ? "tablecells.badge.ellipsis" : "tablecells",
+                                           accessibilityDescription: sobject.custom ? "Custom SObject" : "SObject")
+        imageView?.contentTintColor = icon != nil ? nil : sobject.custom ? .systemOrange : .controlAccentColor
         toolTip = sobject.label
     }
 }

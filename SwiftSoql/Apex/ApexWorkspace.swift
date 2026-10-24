@@ -84,6 +84,7 @@ struct ApexWorkspace: View {
                     Image(systemName: run.success ? "checkmark.circle.fill" : run.compiled ? "exclamationmark.triangle.fill" : "xmark.octagon.fill")
                         .foregroundStyle(run.success ? .green : run.compiled ? .orange : .red)
                         .help(run.success ? "Succeeded" : run.compiled ? "Threw an exception" : "Didn't compile")
+                        .accessibilityLabel(run.success ? "Succeeded" : run.compiled ? "Threw an exception" : "Didn't compile")
                 }
                 .width(18)
                 TableColumn("Time") { run in

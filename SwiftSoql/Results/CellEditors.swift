@@ -25,7 +25,7 @@ struct FieldEditor: View {
         case "date", "datetime":
             DateCell(field: field, value: value?.string, isDisabled: isDisabled, save: save)
         default:
-            EditableCell(value: value?.displayText ?? "", isDisabled: isDisabled, save: save)
+            EditableCell(value: value?.displayText ?? "", label: field.name, isDisabled: isDisabled, save: save)
         }
     }
 }
@@ -61,6 +61,8 @@ private struct PicklistCell: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .disabled(isDisabled)
+        .accessibilityLabel(field.name)
+        .accessibilityValue(value ?? "None")
         .help(value ?? "Choose a value")
     }
 
@@ -86,7 +88,7 @@ private struct DateCell: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            EditableCell(value: value ?? "", isDisabled: isDisabled, save: save)
+            EditableCell(value: value ?? "", label: field.name, isDisabled: isDisabled, save: save)
             if isHovering || isPicking {
                 Button {
                     picked = value.flatMap { SalesforceDates.parse($0, includesTime: includesTime) } ?? Date()
@@ -97,6 +99,7 @@ private struct DateCell: View {
                 .buttonStyle(.borderless)
                 .disabled(isDisabled)
                 .help("Choose a date")
+                .accessibilityLabel("Choose \(field.name)")
                 .popover(isPresented: $isPicking, arrowEdge: .bottom) {
                     picker
                 }
@@ -160,6 +163,8 @@ enum SalesforceDates {
 /// Escape puts the value back.
 struct EditableCell: View {
     let value: String
+    /// What VoiceOver calls the field, such as its name.
+    var label = "Value"
     var isDisabled = false
     /// Saves the text, returning whether it was saved.
     let save: (String) async -> Bool
@@ -170,7 +175,7 @@ struct EditableCell: View {
 
     var body: some View {
         // An empty prompt, so empty values look like the read-only cells.
-        TextField(text: $draft, prompt: Text("")) { Text("Value") }
+        TextField(text: $draft, prompt: Text("")) { Text(label) }
             .labelsHidden()
             .textFieldStyle(.plain)
             .lineLimit(1)

@@ -25,6 +25,9 @@ struct SchemaDiagram: View {
     let describe: SObjectDescribe
     var fieldMode: SchemaFieldMode
     var hideSystemChildren: Bool
+    /// SObject icons; reading `iconsVersion` redraws as they arrive.
+    var icon: (String) -> NSImage? = { _ in nil }
+    var iconsVersion = 0
     var onOpen: (String) -> Void
 
     @State private var hovered: String?
@@ -34,7 +37,8 @@ struct SchemaDiagram: View {
             let layout = SchemaLayout(describe: describe, fieldMode: fieldMode, hideSystemChildren: hideSystemChildren, visibleSize: geometry.size)
             ScrollView([.horizontal, .vertical]) {
                 Canvas { context, _ in
-                    draw(layout, in: &context)
+                    _ = iconsVersion
+                    SchemaDrawing.draw(layout, hovered: hovered, icon: icon, in: &context)
                 }
                 .frame(width: layout.size.width, height: layout.size.height)
                 .onContinuousHover { phase in
@@ -48,6 +52,29 @@ struct SchemaDiagram: View {
                         onOpen(box.name)
                     }
                 }
+                .overlay(alignment: .topLeading) {
+                    // The boxes as elements VoiceOver and UI tests can find and activate. Clear
+                    // views don't take clicks, so the canvas still gets them.
+                    ZStack(alignment: .topLeading) {
+                        ForEach(layout.boxes, id: \.name) { box in
+                            Color.clear
+                                .frame(width: box.frame.width, height: box.frame.height)
+                                .position(x: box.frame.midX, y: box.frame.midY)
+                                .accessibilityElement()
+                                .accessibilityLabel(box.name)
+                                .accessibilityValue(box.accessibilityDescription)
+                                .accessibilityIdentifier("schemaBox.\(box.name)")
+                                .accessibilityAddTraits(box.role == .central ? [] : .isButton)
+                                .accessibilityAction {
+                                    if box.role != .central { onOpen(box.name) }
+                                }
+                        }
+                    }
+                    .frame(width: layout.size.width, height: layout.size.height, alignment: .topLeading)
+                    .allowsHitTesting(false)
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Schema diagram of \(layout.central.name)")
             }
             // Open on the central SObject, which is in the middle, and again when it changes.
             .defaultScrollAnchor(.center)
@@ -55,8 +82,11 @@ struct SchemaDiagram: View {
             .background(Color("schema.background"))
         }
     }
+}
 
-    private func draw(_ layout: SchemaLayout, in context: inout GraphicsContext) {
+/// Draws a laid-out diagram, on screen or for export.
+enum SchemaDrawing {
+    static func draw(_ layout: SchemaLayout, hovered: String?, icon: (String) -> NSImage?, in context: inout GraphicsContext) {
         for line in layout.lines {
             let isHighlighted = line.relatedBox == hovered || (hovered == layout.central.name)
             var path = Path()
@@ -65,23 +95,67 @@ struct SchemaDiagram: View {
             context.stroke(path, with: .color(line.color.opacity(isHighlighted ? 1 : 0.55)), lineWidth: isHighlighted ? 2 : 1)
         }
         for box in layout.boxes {
-            draw(box, highlighted: box.name == hovered, in: &context)
+            draw(box, highlighted: box.name == hovered, icon: icon(box.name), in: &context)
         }
     }
 
-    private func draw(_ box: SchemaBox, highlighted: Bool, in context: inout GraphicsContext) {
+    private static func draw(_ box: SchemaBox, highlighted: Bool, icon: NSImage?, in context: inout GraphicsContext) {
         let shape = RoundedRectangle(cornerRadius: 6).path(in: box.frame)
         context.fill(shape, with: .color(box.color.opacity(highlighted ? 0.18 : 0.08)))
         var title = context
         title.clip(to: shape)
         title.fill(Path(CGRect(x: box.frame.minX, y: box.frame.minY, width: box.frame.width, height: SchemaBox.titleHeight)), with: .color(box.color))
         context.stroke(shape, with: .color(box.color), lineWidth: highlighted ? 3 : 1.5)
+        var titleX = box.frame.minX + SchemaBox.padding
+        if let icon {
+            let size = SchemaBox.iconSize
+            context.draw(Image(nsImage: icon), in: CGRect(x: titleX, y: box.frame.minY + (SchemaBox.titleHeight - size) / 2, width: size, height: size))
+            titleX += size + 4
+        }
         context.draw(Text(box.name).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white),
-                     at: CGPoint(x: box.frame.minX + SchemaBox.padding, y: box.frame.minY + SchemaBox.titleHeight / 2), anchor: .leading)
+                     at: CGPoint(x: titleX, y: box.frame.minY + SchemaBox.titleHeight / 2), anchor: .leading)
         for (i, field) in box.fields.enumerated() {
             context.draw(Text(field).font(.system(size: 11)).foregroundStyle(.primary),
                          at: CGPoint(x: box.frame.minX + SchemaBox.padding, y: box.fieldMidY(i)), anchor: .leading)
         }
+    }
+}
+
+/// Writes a diagram to a PDF or PNG file, on a white background whatever the app's appearance.
+enum SchemaExport {
+    @MainActor
+    private static func renderer(_ layout: SchemaLayout, icon: @escaping (String) -> NSImage?) -> ImageRenderer<some View> {
+        let view = Canvas { context, _ in
+            SchemaDrawing.draw(layout, hovered: nil, icon: icon, in: &context)
+        }
+        .frame(width: layout.size.width, height: layout.size.height)
+        .background(Color.white)
+        .environment(\.colorScheme, .light)
+        return ImageRenderer(content: view)
+    }
+
+    @MainActor
+    static func writePDF(_ layout: SchemaLayout, icon: @escaping (String) -> NSImage?, to url: URL) throws {
+        var written = false
+        renderer(layout, icon: icon).render { size, render in
+            var box = CGRect(origin: .zero, size: size)
+            guard let context = CGContext(url as CFURL, mediaBox: &box, nil) else { return }
+            context.beginPDFPage(nil)
+            render(context)
+            context.endPDFPage()
+            context.closePDF()
+            written = true
+        }
+        guard written else { throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: url.path]) }
+    }
+
+    @MainActor
+    static func writePNG(_ layout: SchemaLayout, icon: @escaping (String) -> NSImage?, to url: URL) throws {
+        let renderer = renderer(layout, icon: icon)
+        renderer.scale = 2
+        guard let image = renderer.cgImage else { throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: url.path]) }
+        let data = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
+        try data?.write(to: url)
     }
 }
 
@@ -90,6 +164,7 @@ struct SchemaBox {
     enum Role { case central, parent, child }
 
     static let titleHeight: CGFloat = 22
+    static let iconSize: CGFloat = 16
     static let rowHeight: CGFloat = 16
     static let padding: CGFloat = 8
     static let minWidth: CGFloat = 120
@@ -107,8 +182,18 @@ struct SchemaBox {
         let fieldFont = NSFont.systemFont(ofSize: 11)
         let fieldWidth = fields.map { ($0 as NSString).size(withAttributes: [.font: fieldFont]).width }.max() ?? 0
         frame = CGRect(x: 0, y: 0,
-                       width: max(Self.minWidth, ceil(max(titleWidth, fieldWidth)) + Self.padding * 2),
+                       width: max(Self.minWidth, ceil(max(titleWidth + Self.iconSize + 4, fieldWidth)) + Self.padding * 2),
                        height: Self.titleHeight + CGFloat(fields.count) * Self.rowHeight + 6)
+    }
+
+    /// What VoiceOver reads after the box's name.
+    var accessibilityDescription: String {
+        let kind = switch role {
+        case .central: "the SObject shown"
+        case .parent: "referred to by it"
+        case .child: "refers to it"
+        }
+        return "\(kind), \(fields.count) \(fields.count == 1 ? "field" : "fields") listed: \(fields.joined(separator: ", "))"
     }
 
     var color: Color {

@@ -132,6 +132,11 @@ actor SalesforceClient {
         queryBatchSize.map { ["Sforce-Query-Options": "batchSize=\($0)"] } ?? [:]
     }
 
+    /// The org's theme: SObject colors and icon URLs.
+    func theme() async throws -> JSONValue {
+        try await get("\(dataPath)/theme")
+    }
+
     /// Asks Salesforce how it would run a query, without running it.
     func explain(_ soql: String) async throws -> [QueryPlan] {
         let json = try await get("\(dataPath)/query", query: [URLQueryItem(name: "explain", value: soql)])

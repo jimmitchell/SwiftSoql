@@ -105,6 +105,9 @@ final class ExplorerModel {
     var isOpeningFile = false
     var isSavingFile = false
 
+    /// SObject icons from the org's theme.
+    let icons = SObjectIcons()
+
     // Anonymous Apex
     var workspace = Workspace.query
     let apex = ApexModel()
@@ -179,6 +182,9 @@ final class ExplorerModel {
             await client.setQueryBatchSize(batchSize > 0 ? batchSize : nil)
             pinnedQueries = AppDefaults.store.stringArray(forKey: pinnedQueriesKey) ?? []
             startBackgroundDescribes()
+            Task { [icons] in
+                if let theme = try? await client.theme() { icons.load(theme: theme) }
+            }
             await refreshAPIUsage()
             AppDefaults.store.set(username, forKey: "lastOrgUsername")
         } catch {
@@ -213,6 +219,7 @@ final class ExplorerModel {
         statusText = ""
         apiUsage = nil
         apex.clearRuns()
+        icons.reset()
     }
 
     func refreshAPIUsage() async {

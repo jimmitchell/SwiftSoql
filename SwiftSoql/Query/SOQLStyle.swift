@@ -55,6 +55,18 @@ enum SOQLStyle {
             (text as NSString).draw(at: NSPoint(x: (rect.width - size.width) / 2, y: (rect.height - size.height) / 2), withAttributes: attrs)
             return true
         }
+        image.accessibilityDescription = switch text {
+        case "F": "Field"
+        case "O": "SObject"
+        case "R": "Relationship"
+        case "Op": "Operator"
+        case "K": "Keyword"
+        case "T": "TYPEOF"
+        case "ƒ": "Function"
+        case "D": "Date literal"
+        case "A": "Alias"
+        default: "Value"
+        }
         icons[type.rawValue] = image
         return image
     }

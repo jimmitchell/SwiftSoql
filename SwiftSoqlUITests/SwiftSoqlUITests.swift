@@ -35,7 +35,7 @@ final class SwiftSoqlUITests: XCTestCase {
         app.launchArguments = arguments + extraArguments
         app.launch()
         if connected {
-            XCTAssertTrue(editor.waitForExistence(timeout: 60), "The app should connect and show the query editor")
+            XCTAssertTrue(app.outlines["schemaSidebar"].waitForExistence(timeout: 60), "The app should connect and show its SObjects")
         }
     }
 
@@ -203,5 +203,16 @@ final class SwiftSoqlUITests: XCTestCase {
         XCTAssertTrue(confirm.waitForExistence(timeout: 5), "Deleting asks first")
         confirm.click()
         XCTAssertTrue(waitForStatus("Deleted 1 row"), "The Task should be deleted")
+    }
+
+    @MainActor
+    func testSchemaDiagramMovesToARelatedSObject() throws {
+        try XCTSkipIf(testOrg == nil, "Set SWIFTSOQL_TEST_ORG to run this test")
+        try launch(extraArguments: ["-showSchema", "Contact", "-schemaHideSystemChildren", "YES"])
+        let account = app.descendants(matching: .any)["schemaBox.Account"]
+        XCTAssertTrue(account.waitForExistence(timeout: 60), "Contact's diagram should show Account, which it refers to")
+        account.doubleClick()
+        let accountDiagram = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Schema diagram of Account'")).firstMatch
+        XCTAssertTrue(accountDiagram.waitForExistence(timeout: 60), "Double-clicking Account should move it to the middle")
     }
 }

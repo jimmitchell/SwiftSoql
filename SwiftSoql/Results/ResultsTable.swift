@@ -122,7 +122,7 @@ struct ResultsTable: View {
     }
 
     private func checkbox(_ row: ResultRow) -> some View {
-        Toggle("Delete", isOn: Binding {
+        Toggle(resultSet.includesDeleted ? "Check row" : "Check row for deletion", isOn: Binding {
             checkedRows?.wrappedValue.contains(row.id) ?? false
         } set: { isOn in
             if isOn {
