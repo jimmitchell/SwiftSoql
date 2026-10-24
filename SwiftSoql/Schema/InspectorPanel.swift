@@ -36,30 +36,50 @@ struct InspectorPanel: View {
     }
 }
 
-/// Queries run in this org, newest first. Click one to put it in the editor; double-click to run it.
+/// Pinned queries, then the queries run recently in this org, newest first. Click one to put it
+/// in the editor; double-click to run it. Pinned queries can be dragged into order.
 struct RecentQueriesList: View {
     let model: ExplorerModel
 
     @State private var selection = Set<String>()
 
     var body: some View {
-        List(model.recentQueries, id: \.self, selection: $selection) { query in
-            Text(query)
-                .font(.system(size: 11, design: .monospaced))
-                .lineLimit(4)
-                .padding(.vertical, 2)
-                .help(query)
+        List(selection: $selection) {
+            if !model.pinnedQueries.isEmpty {
+                Section("Pinned") {
+                    ForEach(model.pinnedQueries, id: \.self) { query in
+                        row(query, isPinned: true)
+                    }
+                    .onMove { model.movePinnedQueries(fromOffsets: $0, toOffset: $1) }
+                }
+            }
+            if !model.recentQueries.isEmpty {
+                Section("Recent") {
+                    ForEach(model.recentQueries, id: \.self) { query in
+                        row(query, isPinned: false)
+                    }
+                }
+            }
         }
         .contextMenu(forSelectionType: String.self) { queries in
+            let pinned = queries.filter(model.pinnedQueries.contains)
+            let recent = queries.subtracting(pinned)
+            if !recent.isEmpty {
+                Button("Pin") { model.pinQueries(recent) }
+            }
+            if !pinned.isEmpty {
+                Button("Unpin") { model.unpinQueries(pinned) }
+            }
             Button("Copy") {
+                let all = model.pinnedQueries + model.recentQueries
                 NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(model.recentQueries.filter(queries.contains).joined(separator: "\n\n"), forType: .string)
+                NSPasteboard.general.setString(all.filter(queries.contains).joined(separator: "\n\n"), forType: .string)
             }
             .disabled(queries.isEmpty)
-            Button("Remove") { model.removeRecentQueries(queries) }
+            Button("Remove") { model.removeQueries(queries) }
                 .disabled(queries.isEmpty)
             Divider()
-            Button("Clear All") { model.removeRecentQueries(Set(model.recentQueries)) }
+            Button("Clear Recent Queries") { model.clearRecentQueries() }
                 .disabled(model.recentQueries.isEmpty)
         } primaryAction: { queries in
             if queries.count == 1, let query = queries.first {
@@ -72,9 +92,25 @@ struct RecentQueriesList: View {
             }
         }
         .overlay {
-            if model.recentQueries.isEmpty {
-                ContentUnavailableView("No Recent Queries", systemImage: "clock", description: Text("Queries you run in this org appear here."))
+            if model.recentQueries.isEmpty && model.pinnedQueries.isEmpty {
+                ContentUnavailableView("No Recent Queries", systemImage: "clock", description: Text("Queries you run in this org appear here. Right-click one to pin it, so it's always kept."))
             }
         }
+    }
+
+    private func row(_ query: String, isPinned: Bool) -> some View {
+        Text(query)
+            .font(.system(size: 11, design: .monospaced))
+            .lineLimit(4)
+            .padding(.vertical, 2)
+            .help(query)
+            .swipeActions(edge: .trailing) {
+                if isPinned {
+                    Button("Unpin", systemImage: "pin.slash") { model.unpinQueries([query]) }
+                } else {
+                    Button("Pin", systemImage: "pin") { model.pinQueries([query]) }
+                        .tint(.orange)
+                }
+            }
     }
 }

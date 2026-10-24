@@ -65,8 +65,10 @@ final class ExplorerModel {
     var results: ResultSet?
     /// A subquery result opened from a cell of `results`.
     var childResults: ResultSet?
-    /// Queries run in this org, newest first.
+    /// Queries run in this org, newest first. Pinned queries aren't included.
     private(set) var recentQueries: [String] = []
+    /// Queries pinned in this org, which are kept however many queries are run.
+    private(set) var pinnedQueries: [String] = []
     /// The fields picked by double-clicking in the schema sidebar, for building a query.
     private var pickedFields: (sobject: String, fields: [String])?
 
@@ -139,6 +141,7 @@ final class ExplorerModel {
             sobjectNames = Set(sobjects.map { $0.name.lowercased() })
             statusText = "Connected, \(sobjects.count) SObject types"
             recentQueries = UserDefaults.standard.stringArray(forKey: recentQueriesKey) ?? []
+            pinnedQueries = UserDefaults.standard.stringArray(forKey: pinnedQueriesKey) ?? []
             startBackgroundDescribes()
             await refreshAPIUsage()
             UserDefaults.standard.set(username, forKey: "lastOrgUsername")
@@ -163,6 +166,7 @@ final class ExplorerModel {
         childResults = nil
         pickedFields = nil
         recentQueries = []
+        pinnedQueries = []
         schemaObjects = [:]
         pendingSchemaObjects = []
         sobjectNames = []
@@ -319,20 +323,59 @@ final class ExplorerModel {
     // MARK: - Recent queries
 
     private var recentQueriesKey: String { "recentQueries-\(session?.username ?? "")" }
+    private var pinnedQueriesKey: String { "pinnedQueries-\(session?.username ?? "")" }
 
     private func addRecentQuery(_ text: String) {
+        // A pinned query stays where it was pinned.
+        guard !pinnedQueries.contains(text) else { return }
         recentQueries.removeAll { $0 == text }
         recentQueries.insert(text, at: 0)
+        saveQueries()
+    }
+
+    /// Saves the recent and pinned queries, keeping only as many recent ones as Settings allows.
+    private func saveQueries() {
         let limit = max(1, UserDefaults.standard.integer(forKey: "maxRecentQueries"))
         if recentQueries.count > limit {
             recentQueries.removeLast(recentQueries.count - limit)
         }
         UserDefaults.standard.set(recentQueries, forKey: recentQueriesKey)
+        UserDefaults.standard.set(pinnedQueries, forKey: pinnedQueriesKey)
     }
 
-    func removeRecentQueries(_ queries: Set<String>) {
+    /// Removes recent or pinned queries.
+    func removeQueries(_ queries: Set<String>) {
         recentQueries.removeAll { queries.contains($0) }
-        UserDefaults.standard.set(recentQueries, forKey: recentQueriesKey)
+        pinnedQueries.removeAll { queries.contains($0) }
+        saveQueries()
+    }
+
+    func clearRecentQueries() {
+        recentQueries = []
+        saveQueries()
+    }
+
+    /// Moves recent queries to the end of the pinned ones, in the order they're listed.
+    func pinQueries(_ queries: Set<String>) {
+        pinnedQueries += recentQueries.filter(queries.contains)
+        recentQueries.removeAll { queries.contains($0) }
+        saveQueries()
+    }
+
+    /// Moves pinned queries back to the top of the recent ones.
+    func unpinQueries(_ queries: Set<String>) {
+        recentQueries.insert(contentsOf: pinnedQueries.filter(queries.contains), at: 0)
+        pinnedQueries.removeAll { queries.contains($0) }
+        saveQueries()
+    }
+
+    func movePinnedQueries(fromOffsets source: IndexSet, toOffset destination: Int) {
+        let moving = source.map { pinnedQueries[$0] }
+        for i in source.reversed() {
+            pinnedQueries.remove(at: i)
+        }
+        pinnedQueries.insert(contentsOf: moving, at: destination - source.count { $0 < destination })
+        saveQueries()
     }
 
     /// Puts a recent query in the editor, optionally running it.
