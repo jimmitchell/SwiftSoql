@@ -26,11 +26,16 @@ nonisolated struct SalesforceError: LocalizedError {
     }
 }
 
-/// The outcome for one record of a delete.
+/// The outcome for one record of a delete or undelete.
 nonisolated struct SaveResult: Sendable {
     let success: Bool
     /// The errors, if it failed.
     let message: String
+
+    init(success: Bool, message: String) {
+        self.success = success
+        self.message = message
+    }
 
     init(json: JSONValue) {
         success = json["success"]?.bool ?? false
@@ -138,22 +143,40 @@ actor SalesforceClient {
 
     /// Runs anonymous Apex and returns the outcome with its debug log.
     func executeAnonymous(_ code: String, logLevels: [ApexLogCategory: ApexLogLevel]) async throws -> ApexExecution {
+        let root = try await soap("services/Soap/s/\(session.apiVersion)") { sessionID in
+            AnonymousApex.request(code: code, sessionID: sessionID, logLevels: logLevels)
+        }
+        return try AnonymousApex.execution(from: root, code: code)
+    }
+
+    /// Restores deleted records from the Recycle Bin, up to 200 at a time, with the partner SOAP
+    /// API; REST has no undelete. The results are in the same order as `ids`.
+    func undelete(ids: [String]) async throws -> [SaveResult] {
+        let root = try await soap("services/Soap/u/\(session.apiVersion)") { sessionID in
+            SOAP.undeleteRequest(ids: ids, sessionID: sessionID)
+        }
+        return SOAP.undeleteResults(from: root)
+    }
+
+    /// Sends a SOAP request, built with the current session Id, trying once more with a fresh
+    /// session if it has expired.
+    private func soap(_ path: String, envelope: (String) -> String) async throws -> XMLElement {
         do {
-            return try await executeAnonymousOnce(code, logLevels: logLevels)
+            return try await soapOnce(path, envelope(session.accessToken))
         } catch let error as SalesforceError where error.isInvalidSession {
             session = try await reauthenticate()
-            return try await executeAnonymousOnce(code, logLevels: logLevels)
+            return try await soapOnce(path, envelope(session.accessToken))
         }
     }
 
-    private func executeAnonymousOnce(_ code: String, logLevels: [ApexLogCategory: ApexLogLevel]) async throws -> ApexExecution {
-        var request = URLRequest(url: session.instanceURL.appending(path: "services/Soap/s/\(session.apiVersion)"))
+    private func soapOnce(_ path: String, _ envelope: String) async throws -> XMLElement {
+        var request = URLRequest(url: session.instanceURL.appending(path: path))
         request.httpMethod = "POST"
         request.setValue("text/xml; charset=UTF-8", forHTTPHeaderField: "Content-Type")
         request.setValue("\"\"", forHTTPHeaderField: "SOAPAction")
-        request.httpBody = Data(AnonymousApex.request(code: code, sessionID: session.accessToken, logLevels: logLevels).utf8)
+        request.httpBody = Data(envelope.utf8)
         let (data, response) = try await urlSession.data(for: request)
-        return try AnonymousApex.execution(fromResponse: data, code: code, status: (response as? HTTPURLResponse)?.statusCode ?? 0)
+        return try SOAP.root(of: data, status: (response as? HTTPURLResponse)?.statusCode ?? 0)
     }
 
     func get(_ path: String, query: [URLQueryItem] = []) async throws -> JSONValue {

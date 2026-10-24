@@ -97,6 +97,13 @@ struct QueryWorkspace: View {
                 .truncationMode(.middle)
                 .foregroundStyle(.secondary)
             Spacer()
+            if let results = model.results, results.isEditable, results.includesDeleted {
+                Button("Restore Checked") {
+                    Task { await model.restoreCheckedRows() }
+                }
+                .disabled(results.checkedRows.isEmpty || model.isSaving)
+                .help("Restore the checked rows' records from the Recycle Bin")
+            }
             if let results = model.results, results.isEditable {
                 Button("Delete Checked") {
                     model.isConfirmingDelete = true

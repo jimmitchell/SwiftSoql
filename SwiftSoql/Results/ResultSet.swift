@@ -20,7 +20,10 @@ struct ResultSet: Identifiable {
     /// How the rows are sorted; empty for the order they were loaded in.
     private(set) var sortOrder: [ResultSortComparator] = []
 
-    /// Rows checked for deletion.
+    /// Whether the query included deleted rows, which can then be restored.
+    var includesDeleted = false
+
+    /// Rows checked for deletion (or, when the query included deleted rows, for restoring).
     var checkedRows: Set<ResultRow.ID> = []
     /// Why rows couldn't be deleted.
     var rowErrors: [ResultRow.ID: String] = [:]

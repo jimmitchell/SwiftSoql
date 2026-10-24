@@ -103,6 +103,11 @@ struct QueryCommands: Commands {
 
             Divider()
 
+            Button("Restore Checked Rows") {
+                Task { await model?.restoreCheckedRows() }
+            }
+            .disabled(model?.results?.includesDeleted != true || model?.results?.checkedRows.isEmpty != false || model?.isSaving == true)
+
             Button("Delete Checked Rows…") {
                 model?.isConfirmingDelete = true
             }

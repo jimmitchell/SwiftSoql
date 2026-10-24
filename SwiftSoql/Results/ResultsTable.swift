@@ -79,7 +79,7 @@ struct ResultsTable: View {
             openInSalesforceItems(ids)
             if let checkedRows {
                 Divider()
-                Button("Check Rows for Deletion") { checkedRows.wrappedValue.formUnion(ids) }
+                Button(resultSet.includesDeleted ? "Check Rows" : "Check Rows for Deletion") { checkedRows.wrappedValue.formUnion(ids) }
                     .disabled(ids.isEmpty)
                 Button("Uncheck Rows") { checkedRows.wrappedValue.subtract(ids) }
                     .disabled(ids.isEmpty)
@@ -130,7 +130,7 @@ struct ResultsTable: View {
         })
         .toggleStyle(.checkbox)
         .labelsHidden()
-        .help("Check rows, then click Delete Checked to delete them")
+        .help(resultSet.includesDeleted ? "Check rows, then click Restore Checked or Delete Checked" : "Check rows, then click Delete Checked to delete them")
     }
 
     @ViewBuilder

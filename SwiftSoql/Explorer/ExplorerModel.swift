@@ -317,6 +317,7 @@ final class ExplorerModel {
                     : "Query returned 0 rows \(time)"
             } else {
                 results = ResultSet(result: result)
+                results?.includesDeleted = includeDeleted
                 statusText = rowsLoadedStatus(time: time)
                 describeResultTypes()
             }
@@ -501,6 +502,42 @@ final class ExplorerModel {
             await refreshAPIUsage()
             return false
         }
+    }
+
+    /// Restores the checked records from the Recycle Bin, in batches of 200. Restored rows are
+    /// unchecked and show IsDeleted as false if it was queried; rows that fail stay checked and
+    /// show why.
+    func restoreCheckedRows() async {
+        guard let client, let checked = results?.checkedRows, !checked.isEmpty, !isSaving else { return }
+        let rows = (results?.rows ?? []).filter { checked.contains($0.id) && $0.recordID != nil }
+        isSaving = true
+        defer { isSaving = false }
+        var restored = 0
+        var errors: [ResultRow.ID: String] = [:]
+        for start in stride(from: 0, to: rows.count, by: 200) {
+            let batch = rows[start..<min(start + 200, rows.count)]
+            statusText = "Restoring \(start + batch.count) of \(rows.count) rows…"
+            do {
+                let saveResults = try await client.undelete(ids: batch.compactMap(\.recordID))
+                for (row, saveResult) in zip(batch, saveResults) {
+                    if saveResult.success, let id = row.recordID {
+                        restored += 1
+                        results?.checkedRows.remove(row.id)
+                        results?.applyUpdate(recordID: id, field: "IsDeleted", value: .bool(false))
+                    } else {
+                        errors[row.id] = saveResult.message
+                    }
+                }
+            } catch {
+                for row in rows[start...] {
+                    errors[row.id] = error.localizedDescription
+                }
+                break
+            }
+        }
+        results?.rowErrors = errors
+        statusText = "Restored \(restored) \(restored == 1 ? "row" : "rows")" + (errors.isEmpty ? "" : ", \(errors.count) failed")
+        await refreshAPIUsage()
     }
 
     /// Deletes the records checked in the results, in batches of 200. Rows that fail stay checked

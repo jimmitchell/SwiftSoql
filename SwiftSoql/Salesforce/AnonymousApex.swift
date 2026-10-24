@@ -70,7 +70,6 @@ nonisolated struct ApexExecution: Identifiable, Sendable {
 /// also run anonymous Apex, but only the SOAP call returns the debug log with the result.
 nonisolated enum AnonymousApex {
     static let apexNamespace = "http://soap.sforce.com/2006/08/apex"
-    static let soapNamespace = "http://schemas.xmlsoap.org/soap/envelope/"
 
     static func request(code: String, sessionID: String, logLevels: [ApexLogCategory: ApexLogLevel]) -> String {
         var categories = ""
@@ -82,36 +81,20 @@ nonisolated enum AnonymousApex {
         }
         return """
         <?xml version="1.0" encoding="UTF-8"?>
-        <s:Envelope xmlns:s="\(soapNamespace)" xmlns="\(apexNamespace)">\
+        <s:Envelope xmlns:s="\(SOAP.envelopeNamespace)" xmlns="\(apexNamespace)">\
         <s:Header>\
-        <SessionHeader><sessionId>\(escaped(sessionID))</sessionId></SessionHeader>\
+        <SessionHeader><sessionId>\(SOAP.escaped(sessionID))</sessionId></SessionHeader>\
         <DebuggingHeader>\(categories)</DebuggingHeader>\
         </s:Header>\
-        <s:Body><executeAnonymous><String>\(escaped(code))</String></executeAnonymous></s:Body>\
+        <s:Body><executeAnonymous><String>\(SOAP.escaped(code))</String></executeAnonymous></s:Body>\
         </s:Envelope>
         """
     }
 
-    /// Reads an executeAnonymous response, throwing the SOAP fault if there is one.
-    static func execution(fromResponse data: Data, code: String, status: Int) throws -> ApexExecution {
-        let doc: XMLDocument
-        do {
-            doc = try XMLDocument(data: data)
-        } catch {
-            let body = String(decoding: data.prefix(500), as: UTF8.self)
-            throw SalesforceError(statusCode: status, errorCode: "HTTP \(status)", message: body.isEmpty ? "HTTP \(status)" : body)
-        }
-        guard let root = doc.rootElement() else {
-            throw SalesforceError(statusCode: status, errorCode: "", message: "Salesforce returned an empty response.")
-        }
-        if let fault = root.descendant("Fault") {
-            let code = fault.descendant("faultcode")?.stringValue ?? ""
-            // Fault codes look like "sf:INVALID_SESSION_ID".
-            let errorCode = code.split(separator: ":").last.map(String.init) ?? code
-            throw SalesforceError(statusCode: status, errorCode: errorCode, message: fault.descendant("faultstring")?.stringValue ?? code)
-        }
+    /// Reads an executeAnonymous response.
+    static func execution(from root: XMLElement, code: String) throws -> ApexExecution {
         guard let result = root.descendant("executeAnonymousResponse")?.descendant("result") else {
-            throw SalesforceError(statusCode: status, errorCode: "", message: "Unexpected response to executeAnonymous.")
+            throw SalesforceError(statusCode: 200, errorCode: "", message: "Unexpected response to executeAnonymous.")
         }
         func text(_ name: String) -> String? {
             guard let e = result.child(name), e.attribute(forName: "xsi:nil")?.stringValue != "true" else { return nil }
@@ -129,36 +112,5 @@ nonisolated enum AnonymousApex {
             exceptionStackTrace: text("exceptionStackTrace"),
             debugLog: root.descendant("DebuggingInfo")?.descendant("debugLog")?.stringValue ?? ""
         )
-    }
-
-    private static func escaped(_ s: String) -> String {
-        var out = ""
-        for u in s.unicodeScalars {
-            switch u {
-            case "&": out += "&amp;"
-            case "<": out += "&lt;"
-            case ">": out += "&gt;"
-            case "\"": out += "&quot;"
-            // Keep carriage returns, which XML parsers would otherwise turn into newlines.
-            case "\r": out += "&#13;"
-            default: out.unicodeScalars.append(u)
-            }
-        }
-        return out
-    }
-}
-
-private nonisolated extension XMLElement {
-    func child(_ localName: String) -> XMLElement? {
-        children?.lazy.compactMap { $0 as? XMLElement }.first { $0.localName == localName }
-    }
-
-    /// The first element below this one with the given name, ignoring namespaces.
-    func descendant(_ localName: String) -> XMLElement? {
-        for case let element as XMLElement in children ?? [] {
-            if element.localName == localName { return element }
-            if let found = element.descendant(localName) { return found }
-        }
-        return nil
     }
 }
