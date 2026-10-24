@@ -84,6 +84,9 @@ struct QueryWorkspace: View {
         } message: {
             Text("Exporting all rows fetches the rest of the results from Salesforce first.")
         }
+        .sheet(item: $model.queryPlan) { plan in
+            QueryPlanView(result: plan)
+        }
         .confirmationDialog(deleteConfirmationTitle, isPresented: $model.isConfirmingDelete) {
             Button("Delete", role: .destructive) {
                 Task { await model.deleteCheckedRows() }

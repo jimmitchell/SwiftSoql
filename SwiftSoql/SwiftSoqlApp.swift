@@ -118,6 +118,12 @@ struct QueryCommands: Commands {
             .pickerStyle(.inline)
             .disabled(model?.isConnected != true)
 
+            Button("Show Query Plan") {
+                Task { await model?.explainQuery() }
+            }
+            .keyboardShortcut(.return, modifiers: [.command, .option])
+            .disabled(model?.isConnected != true || model?.isQuerying == true || model?.workspace != .query)
+
             Divider()
 
             Button("Load More Rows") {

@@ -78,6 +78,9 @@ final class ExplorerModel {
     }
     var isQuerying: Bool { currentTab.isQuerying }
 
+    /// The plans for the current tab's query, while they're shown.
+    var queryPlan: QueryPlanResult?
+
     /// True while an edit or delete is being saved.
     private(set) var isSaving = false
     /// Set to ask the user to confirm deleting the checked rows.
@@ -356,6 +359,29 @@ final class ExplorerModel {
         } catch {
             tab.statusText = ""
             self.error = DisplayedError("Query failed", error)
+        }
+        await refreshAPIUsage()
+    }
+
+    /// Shows how Salesforce would run the current tab's query, without running it.
+    func explainQuery() async {
+        let tab = currentTab
+        let text = tab.soql.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let client, !text.isEmpty, !tab.isQuerying else { return }
+        guard !text.lowercased().hasPrefix("find") else {
+            error = DisplayedError("Can't show a query plan", InvalidFieldValue(errorDescription: "Query plans are only available for SOQL queries, not SOSL searches."))
+            return
+        }
+        tab.isQuerying = true
+        defer { tab.isQuerying = false }
+        tab.statusText = "Getting the query plan…"
+        do {
+            let plans = try await client.explain(text)
+            tab.statusText = ""
+            queryPlan = QueryPlanResult(query: text, plans: plans)
+        } catch {
+            tab.statusText = ""
+            self.error = DisplayedError("Unable to get the query plan", error)
         }
         await refreshAPIUsage()
     }

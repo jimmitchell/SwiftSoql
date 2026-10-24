@@ -121,6 +121,14 @@ actor SalesforceClient {
         return QueryResult(json: try await get("\(dataPath)/\(includeDeleted ? "queryAll" : "query")", query: q))
     }
 
+    /// Asks Salesforce how it would run a query, without running it.
+    func explain(_ soql: String) async throws -> [QueryPlan] {
+        let json = try await get("\(dataPath)/query", query: [URLQueryItem(name: "explain", value: soql)])
+        return (json["plans"]?.array ?? []).enumerated()
+            .map { QueryPlan(id: $0.offset, json: $0.element) }
+            .sorted { $0.relativeCost < $1.relativeCost }
+    }
+
     /// Fetches the next batch of a query, given the `nextRecordsUrl` of the previous batch.
     func queryMore(_ nextRecordsURL: String) async throws -> QueryResult {
         QueryResult(json: try await get(nextRecordsURL))
