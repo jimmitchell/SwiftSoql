@@ -17,6 +17,9 @@ struct ResultSet: Identifiable {
     /// For subquery results, the row of the parent results they came from.
     var parentRowID: ResultRow.ID?
 
+    /// How the rows are sorted; empty for the order they were loaded in.
+    private(set) var sortOrder: [ResultSortComparator] = []
+
     /// Rows checked for deletion.
     var checkedRows: Set<ResultRow.ID> = []
     /// Why rows couldn't be deleted.
@@ -64,6 +67,15 @@ struct ResultSet: Identifiable {
         }
         // A later batch can resolve columns that were null in every earlier row.
         columns = QueryColumns.names(for: rows.map(\.record), isSearchResult: isSearchResult)
+        if !sortOrder.isEmpty {
+            rows.sort(using: sortOrder)
+        }
+    }
+
+    /// Sorts the rows, or puts them back in the order they were loaded if `order` is empty.
+    mutating func sort(by order: [ResultSortComparator]) {
+        sortOrder = order
+        rows.sort(using: order.isEmpty ? [ResultSortComparator(column: "")] : order)
     }
 
     /// Removes deleted rows.

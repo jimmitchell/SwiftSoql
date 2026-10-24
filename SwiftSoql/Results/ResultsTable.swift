@@ -10,6 +10,8 @@ struct ResultsTable: View {
     var model: ExplorerModel
     /// The rows checked for deletion, or nil if rows can't be deleted from this table.
     var checkedRows: Binding<Set<ResultRow.ID>>?
+    /// How the rows are sorted. Clicking a column header changes it.
+    var sortOrder: Binding<[ResultSortComparator]>
     /// Called when a subquery cell is clicked.
     var onOpenChild: (QueryResult, String, ResultRow.ID) -> Void = { _, _, _ in }
 
@@ -33,16 +35,18 @@ struct ResultsTable: View {
     }
 
     var body: some View {
-        Table(resultSet.rows, selection: $selection) {
+        Table(resultSet.rows, selection: $selection, sortOrder: sortOrder) {
             TableColumnForEach(tableColumns, id: \.self) { column in
+                // Every column needs the same kind of sort; the checkbox and error columns sort
+                // by the original order.
                 switch column {
                 case .check:
-                    TableColumn("") { row in
+                    TableColumn("", sortUsing: ResultSortComparator(column: "")) { row in
                         checkbox(row)
                     }
                     .width(22)
                 case .error:
-                    TableColumn("Error") { row in
+                    TableColumn("Error", sortUsing: ResultSortComparator(column: "")) { row in
                         let message = resultSet.rowErrors[row.id] ?? ""
                         Text(message)
                             .foregroundStyle(.red)
@@ -51,7 +55,7 @@ struct ResultsTable: View {
                     }
                     .width(min: 40, ideal: 240)
                 case .field(let name):
-                    TableColumn(name) { row in
+                    TableColumn(name, sortUsing: ResultSortComparator(column: name)) { row in
                         cell(row, column: name)
                     }
                     .width(min: 40, ideal: resultSet.idealWidth(for: name))
@@ -65,6 +69,8 @@ struct ResultsTable: View {
                 .disabled(ids.isEmpty)
             Button("Copy with Column Names") { copy(ids, includeHeader: true) }
                 .disabled(ids.isEmpty)
+            Button("Show in Loaded Order") { sortOrder.wrappedValue = [] }
+                .disabled(sortOrder.wrappedValue.isEmpty)
             if let checkedRows {
                 Divider()
                 Button("Check Rows for Deletion") { checkedRows.wrappedValue.formUnion(ids) }

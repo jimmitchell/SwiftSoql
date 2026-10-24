@@ -37,7 +37,11 @@ struct QueryWorkspace: View {
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
                     Divider()
-                    ResultsTable(resultSet: child, model: model)
+                    ResultsTable(resultSet: child, model: model, sortOrder: Binding {
+                        model.childResults?.sortOrder ?? []
+                    } set: {
+                        model.childResults?.sort(by: $0)
+                    })
                 }
                 .frame(minHeight: 100, idealHeight: 220)
             }
@@ -131,7 +135,11 @@ struct QueryWorkspace: View {
     @ViewBuilder
     private var results: some View {
         if let results = model.results {
-            ResultsTable(resultSet: results, model: model, checkedRows: results.isEditable ? checkedRows : nil) { child, column, rowID in
+            ResultsTable(resultSet: results, model: model, checkedRows: results.isEditable ? checkedRows : nil, sortOrder: Binding {
+                model.results?.sortOrder ?? []
+            } set: {
+                model.results?.sort(by: $0)
+            }) { child, column, rowID in
                 model.showChildResults(child, column: column, parentRowID: rowID)
             }
         } else {
