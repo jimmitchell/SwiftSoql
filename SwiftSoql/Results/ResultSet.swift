@@ -20,6 +20,9 @@ struct ResultSet: Identifiable {
     /// How the rows are sorted; empty for the order they were loaded in.
     private(set) var sortOrder: [ResultSortComparator] = []
 
+    /// The query that produced these results, for exporting all of its rows.
+    var query: String?
+
     /// Whether the query included deleted rows, which can then be restored.
     var includesDeleted = false
 
@@ -71,14 +74,14 @@ struct ResultSet: Identifiable {
         // A later batch can resolve columns that were null in every earlier row.
         columns = QueryColumns.names(for: rows.map(\.record), isSearchResult: isSearchResult)
         if !sortOrder.isEmpty {
-            rows.sort(using: sortOrder)
+            rows = ResultSortComparator.sorted(rows, by: sortOrder)
         }
     }
 
     /// Sorts the rows, or puts them back in the order they were loaded if `order` is empty.
     mutating func sort(by order: [ResultSortComparator]) {
         sortOrder = order
-        rows.sort(using: order.isEmpty ? [ResultSortComparator(column: "")] : order)
+        rows = ResultSortComparator.sorted(rows, by: order)
     }
 
     /// Removes deleted rows.

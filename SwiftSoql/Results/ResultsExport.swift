@@ -5,11 +5,76 @@ import UniformTypeIdentifiers
 enum ResultsExport {
     /// RFC 4180 CSV of every loaded row, with a header row of column names.
     static func csv(_ resultSet: ResultSet) -> String {
-        var lines = [resultSet.columns.map { quoted($0) }.joined(separator: ",")]
-        for row in resultSet.rows {
-            lines.append(resultSet.columns.map { quoted(csvText(row.record, column: $0)) }.joined(separator: ","))
+        csvHeader(resultSet.columns) + resultSet.rows.map { csvLine($0.record, columns: resultSet.columns) }.joined()
+    }
+
+    static func csvHeader(_ columns: [String]) -> String {
+        columns.map { quoted($0) }.joined(separator: ",") + "\r\n"
+    }
+
+    /// One record as a CSV line, ending in CRLF.
+    static func csvLine(_ record: JSONObject, columns: [String]) -> String {
+        columns.map { quoted(csvText(record, column: $0)) }.joined(separator: ",") + "\r\n"
+    }
+
+    /// Rewrites CSV from the Bulk API (LF line endings, values quoted only when needed) in the
+    /// same form as `csv`: every value quoted, CRLF line endings, and text that a spreadsheet
+    /// would run as a formula prefixed with an apostrophe. Returns the text and the number of
+    /// records, not counting the header row, which is left out if `includeHeader` is false.
+    static func bulkCSV(_ data: Data, includeHeader: Bool) -> (text: String, records: Int) {
+        var out = ""
+        var records = 0
+        var row: [String] = []
+        var field = ""
+        var inQuotes = false
+        var isHeader = true
+        var chars = String(decoding: data, as: UTF8.self).makeIterator()
+        func endRow() {
+            row.append(field)
+            field = ""
+            defer { row = []; isHeader = false }
+            guard row != [""] else { return }
+            if isHeader {
+                if includeHeader { out += row.map { quoted($0) }.joined(separator: ",") + "\r\n" }
+            } else {
+                records += 1
+                out += row.map { quoted(neutralized($0)) }.joined(separator: ",") + "\r\n"
+            }
         }
-        return lines.joined(separator: "\r\n") + "\r\n"
+        while let c = chars.next() {
+            if inQuotes {
+                if c == "\"" {
+                    // A doubled quote is a literal quote; otherwise the quoted value ends.
+                    var lookahead = chars
+                    if lookahead.next() == "\"" {
+                        field.append("\"")
+                        chars = lookahead
+                    } else {
+                        inQuotes = false
+                    }
+                } else {
+                    field.append(c)
+                }
+            } else if c == "\"" {
+                inQuotes = true
+            } else if c == "," {
+                row.append(field)
+                field = ""
+            } else if c == "\n" || c == "\r\n" {
+                endRow()
+            } else {
+                field.append(c)
+            }
+        }
+        if !field.isEmpty || !row.isEmpty { endRow() }
+        return (out, records)
+    }
+
+    /// Text that a spreadsheet would treat as a formula gets a leading apostrophe; numbers,
+    /// including negative ones, are left alone.
+    private static func neutralized(_ value: String) -> String {
+        guard let first = value.unicodeScalars.first, "=+-@\t\r".unicodeScalars.contains(first), Double(value) == nil else { return value }
+        return "'" + value
     }
 
     /// Tab-separated rows for the clipboard, in table order.
@@ -33,13 +98,11 @@ enum ResultsExport {
 
     /// Like `text`, but text values that a spreadsheet would treat as a formula get a leading
     /// apostrophe, so record data can't run formulas when the file is opened in Excel or Numbers.
-    /// Numbers are left alone, so negative values stay numeric.
+    /// Numbers, and text that reads as a number, are left alone, so negative values stay numeric.
     private static func csvText(_ record: JSONObject, column: String) -> String {
         let value = text(record, column: column)
-        guard case .string = record.value(atPath: column.split(separator: ".")),
-              let first = value.unicodeScalars.first, "=+-@\t\r".unicodeScalars.contains(first)
-        else { return value }
-        return "'" + value
+        guard case .string = record.value(atPath: column.split(separator: ".")) else { return value }
+        return neutralized(value)
     }
 
     private static func quoted(_ s: String) -> String {

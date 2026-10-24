@@ -13,10 +13,23 @@ nonisolated struct ResultSortComparator: SortComparator, Hashable, Sendable {
     }
 
     func compare(_ lhs: ResultRow, _ rhs: ResultRow) -> ComparisonResult {
+        let path = column.split(separator: ".")
+        return compare(Self.sortValue(lhs.record.value(atPath: path)), lhs.id, Self.sortValue(rhs.record.value(atPath: path)), rhs.id)
+    }
+
+    /// Sorts rows by the first comparator, reading each row's value once rather than on every
+    /// comparison, which matters for related fields in tens of thousands of rows.
+    static func sorted(_ rows: [ResultRow], by order: [ResultSortComparator]) -> [ResultRow] {
+        let comparator = order.first ?? ResultSortComparator(column: "")
+        let path = comparator.column.split(separator: ".")
+        let keyed = rows.map { row in (row, comparator.column.isEmpty ? nil : sortValue(row.record.value(atPath: path))) }
+        return keyed.sorted { a, b in
+            comparator.compare(a.1, a.0.id, b.1, b.0.id) == .orderedAscending
+        }.map(\.0)
+    }
+
+    private func compare(_ a: SortValue?, _ lhsID: Int, _ b: SortValue?, _ rhsID: Int) -> ComparisonResult {
         if !column.isEmpty {
-            let path = column.split(separator: ".")
-            let a = Self.sortValue(lhs.record.value(atPath: path))
-            let b = Self.sortValue(rhs.record.value(atPath: path))
             switch (a, b) {
             case (nil, nil): break
             case (nil, _): return .orderedDescending
@@ -28,7 +41,7 @@ nonisolated struct ResultSortComparator: SortComparator, Hashable, Sendable {
                 }
             }
         }
-        let byLoadOrder: ComparisonResult = lhs.id < rhs.id ? .orderedAscending : lhs.id > rhs.id ? .orderedDescending : .orderedSame
+        let byLoadOrder: ComparisonResult = lhsID < rhsID ? .orderedAscending : lhsID > rhsID ? .orderedDescending : .orderedSame
         return column.isEmpty && order == .reverse ? byLoadOrder.reversed : byLoadOrder
     }
 

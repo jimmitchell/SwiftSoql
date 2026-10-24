@@ -12,6 +12,8 @@ struct SwiftSoqlApp: App {
             "soqlUppercaseKeywords": true,
             "maxRecentQueries": 25,
             "describeAllInBackground": true,
+            "tableRowLimit": 50_000,
+            "bulkExportThreshold": 10_000,
         ])
     }
 

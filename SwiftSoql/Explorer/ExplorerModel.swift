@@ -173,6 +173,8 @@ final class ExplorerModel {
             statusText = "Connected, \(sobjects.count) SObject types"
             currentTab.statusText = statusText
             recentQueries = AppDefaults.store.stringArray(forKey: recentQueriesKey) ?? []
+            let batchSize = AppDefaults.store.integer(forKey: "queryBatchSize")
+            await client.setQueryBatchSize(batchSize > 0 ? batchSize : nil)
             pinnedQueries = AppDefaults.store.stringArray(forKey: pinnedQueriesKey) ?? []
             startBackgroundDescribes()
             await refreshAPIUsage()
@@ -327,7 +329,16 @@ final class ExplorerModel {
 
     // MARK: - Query
 
-    var canLoadMore: Bool { results?.nextRecordsURL != nil }
+    /// The most rows a results table loads; exporting all rows writes the rest straight to the file.
+    static var tableRowLimit: Int { max(1, AppDefaults.store.integer(forKey: "tableRowLimit")) }
+    /// Exports of more rows than this use the Bulk API, when the query allows it.
+    static var bulkExportThreshold: Int { AppDefaults.store.integer(forKey: "bulkExportThreshold") }
+
+    /// Whether more rows can be loaded into the current tab's table.
+    var canLoadMore: Bool {
+        guard let results else { return false }
+        return results.nextRecordsURL != nil && results.rows.count < Self.tableRowLimit
+    }
 
     /// Runs the query in the editor. `includeDeleted` uses queryAll, which also returns deleted and archived rows.
     func runQuery(includeDeleted: Bool = false) async {
@@ -353,6 +364,7 @@ final class ExplorerModel {
             } else {
                 tab.results = ResultSet(result: result)
                 tab.results?.includesDeleted = includeDeleted
+                tab.results?.query = text
                 tab.statusText = rowsLoadedStatus(tab, time: time)
                 describeResultTypes(tab)
             }
@@ -510,7 +522,8 @@ final class ExplorerModel {
     /// Fetches the next batch of rows for a tab's results (the current tab's by default).
     func loadMore(in tab: QueryTab? = nil) async {
         let tab = tab ?? currentTab
-        guard let client, let next = tab.results?.nextRecordsURL, !tab.isQuerying else { return }
+        guard let client, let next = tab.results?.nextRecordsURL, !tab.isQuerying,
+              (tab.results?.rows.count ?? 0) < Self.tableRowLimit else { return }
         tab.isQuerying = true
         defer { tab.isQuerying = false }
         let started = ContinuousClock.now
@@ -528,7 +541,7 @@ final class ExplorerModel {
     /// Fetches every remaining batch of the current tab's results, e.g. before exporting.
     func loadAll() async {
         let tab = currentTab
-        while tab.results?.nextRecordsURL != nil, error == nil {
+        while tab.results?.nextRecordsURL != nil, (tab.results?.rows.count ?? 0) < Self.tableRowLimit, error == nil {
             await loadMore(in: tab)
         }
     }
@@ -540,7 +553,112 @@ final class ExplorerModel {
 
     private func rowsLoadedStatus(_ tab: QueryTab, time: String) -> String {
         guard let results = tab.results else { return "" }
-        return "Loaded \(results.rows.count) of \(results.totalSize) total rows \(time)"
+        let status = "Loaded \(results.rows.count) of \(results.totalSize) total rows \(time)"
+        if results.nextRecordsURL != nil, results.rows.count >= Self.tableRowLimit {
+            return status + ". The table stops at \(Self.tableRowLimit.formatted()) rows; Export CSV gets them all."
+        }
+        return status
+    }
+
+    // MARK: - Exporting
+
+    /// Writes every row of the current tab's query to a CSV file: the rows already loaded, then
+    /// the rest straight from Salesforce, without loading them into the table. Large exports use
+    /// a Bulk API job when the query allows it, and fall back to paging if the job can't run.
+    func exportAll(to url: URL) async {
+        let tab = currentTab
+        guard let client, let results = tab.results, !tab.isQuerying else { return }
+        tab.isQuerying = true
+        defer { tab.isQuerying = false }
+        let started = ContinuousClock.now
+        do {
+            var rows = 0
+            var exported = false
+            if results.totalSize > Self.bulkExportThreshold, let query = results.query, BulkExport.canRun(query) {
+                do {
+                    rows = try await bulkExport(query, includeDeleted: results.includesDeleted, to: url, tab: tab, client: client)
+                    exported = true
+                } catch let error as BulkJobUnavailable {
+                    // The job couldn't start or run; page through the results instead.
+                    tab.statusText = "Bulk API unavailable (\(error.message)); exporting page by page…"
+                }
+            }
+            if !exported {
+                rows = try await pagedExport(results, to: url, tab: tab, client: client)
+            }
+            tab.statusText = "Exported \(rows.formatted()) rows to \(url.lastPathComponent) \(Self.elapsed(since: started))"
+        } catch {
+            tab.statusText = ""
+            self.error = DisplayedError("Unable to export", error)
+        }
+        await refreshAPIUsage()
+    }
+
+    private struct BulkJobUnavailable: Error {
+        let message: String
+    }
+
+    private func pagedExport(_ results: ResultSet, to url: URL, tab: QueryTab, client: SalesforceClient) async throws -> Int {
+        let file = try Self.createFile(at: url)
+        defer { try? file.close() }
+        let columns = results.columns
+        try file.write(contentsOf: Data((ResultsExport.csvHeader(columns) + results.rows.map { ResultsExport.csvLine($0.record, columns: columns) }.joined()).utf8))
+        var rows = results.rows.count
+        var next = results.nextRecordsURL
+        while let url = next {
+            tab.statusText = "Exporting \(rows.formatted()) of \(results.totalSize.formatted()) rows…"
+            let batch = try await client.queryMore(url)
+            try file.write(contentsOf: Data(batch.records.map { ResultsExport.csvLine($0, columns: columns) }.joined().utf8))
+            rows += batch.records.count
+            next = batch.nextRecordsURL
+        }
+        return rows
+    }
+
+    private func bulkExport(_ query: String, includeDeleted: Bool, to url: URL, tab: QueryTab, client: SalesforceClient) async throws -> Int {
+        tab.statusText = "Starting a Bulk API job…"
+        let jobID: String
+        do {
+            jobID = try await client.startBulkQuery(query, includeDeleted: includeDeleted)
+        } catch {
+            throw BulkJobUnavailable(message: error.localizedDescription)
+        }
+        while true {
+            let status = try await client.bulkQueryStatus(jobID)
+            switch status.state {
+            case "JobComplete":
+                break
+            case "Failed", "Aborted":
+                throw BulkJobUnavailable(message: status.error ?? "the job \(status.state.lowercased())")
+            default:
+                tab.statusText = "Salesforce is preparing the export (\(status.processed.formatted()) rows so far)…"
+                try await Task.sleep(for: .seconds(2))
+                continue
+            }
+            break
+        }
+        let file = try Self.createFile(at: url)
+        defer { try? file.close() }
+        var rows = 0
+        var locator: String?
+        var first = true
+        repeat {
+            tab.statusText = "Downloading \(rows.formatted()) rows…"
+            let page = try await client.bulkQueryResults(jobID, locator: locator)
+            let converted = ResultsExport.bulkCSV(page.csv, includeHeader: first)
+            try file.write(contentsOf: Data(converted.text.utf8))
+            rows += converted.records
+            locator = page.nextLocator
+            first = false
+        } while locator != nil
+        return rows
+    }
+
+    private static func createFile(at url: URL) throws -> FileHandle {
+        guard FileManager.default.createFile(atPath: url.path, contents: nil) else {
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: url.path])
+        }
+        return try FileHandle(forWritingTo: url)
     }
 
     /// Describes the SObject types in the results in the background, so the table knows which

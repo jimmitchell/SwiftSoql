@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -74,15 +75,10 @@ struct QueryWorkspace: View {
             }
         }
         .confirmationDialog("Export which rows?", isPresented: $isConfirmingExport) {
-            Button("All \(model.results?.totalSize ?? 0) Rows") {
-                Task {
-                    await model.loadAll()
-                    prepareExport()
-                }
-            }
-            Button("Loaded \(model.results?.rows.count ?? 0) Rows") { prepareExport() }
+            Button("All \((model.results?.totalSize ?? 0).formatted()) Rows…") { chooseFileForAllRows() }
+            Button("Loaded \((model.results?.rows.count ?? 0).formatted()) Rows") { prepareExport() }
         } message: {
-            Text("Exporting all rows fetches the rest of the results from Salesforce first.")
+            Text("Exporting all rows fetches the rest from Salesforce and writes them straight to the file, using the Bulk API for large exports when the query allows it.")
         }
         .sheet(item: $model.queryPlan) { plan in
             QueryPlanView(result: plan)
@@ -127,7 +123,7 @@ struct QueryWorkspace: View {
                 .disabled(model.isQuerying)
             }
             Button {
-                if model.canLoadMore {
+                if model.results?.nextRecordsURL != nil {
                     isConfirmingExport = true
                 } else {
                     prepareExport()
@@ -171,6 +167,22 @@ struct QueryWorkspace: View {
     private var deleteConfirmationTitle: String {
         let count = model.results?.checkedRows.count ?? 0
         return "Delete \(count) \(count == 1 ? "record" : "records")?"
+    }
+
+    /// Asks where to save, then exports every row there.
+    private func chooseFileForAllRows() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.commaSeparatedText]
+        panel.nameFieldStringValue = "Query Results.csv"
+        let export = { (response: NSApplication.ModalResponse) in
+            guard response == .OK, let url = panel.url else { return }
+            Task { await model.exportAll(to: url) }
+        }
+        if let window = NSApp.keyWindow {
+            panel.beginSheetModal(for: window, completionHandler: export)
+        } else {
+            panel.begin(completionHandler: export)
+        }
     }
 
     private func prepareExport() {

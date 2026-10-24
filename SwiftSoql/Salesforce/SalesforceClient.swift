@@ -118,7 +118,18 @@ actor SalesforceClient {
         if soql.lowercased().hasPrefix("find ") {
             return QueryResult(searchResponse: try await get("\(dataPath)/search", query: q))
         }
-        return QueryResult(json: try await get("\(dataPath)/\(includeDeleted ? "queryAll" : "query")", query: q))
+        return QueryResult(json: try await send("GET", "\(dataPath)/\(includeDeleted ? "queryAll" : "query")", query: q, headers: queryHeaders))
+    }
+
+    /// Rows per batch for queries, from 200 to 2,000; nil for Salesforce's default (2,000).
+    private(set) var queryBatchSize: Int?
+
+    func setQueryBatchSize(_ size: Int?) {
+        queryBatchSize = size
+    }
+
+    private var queryHeaders: [String: String] {
+        queryBatchSize.map { ["Sforce-Query-Options": "batchSize=\($0)"] } ?? [:]
     }
 
     /// Asks Salesforce how it would run a query, without running it.
@@ -131,7 +142,50 @@ actor SalesforceClient {
 
     /// Fetches the next batch of a query, given the `nextRecordsUrl` of the previous batch.
     func queryMore(_ nextRecordsURL: String) async throws -> QueryResult {
-        QueryResult(json: try await get(nextRecordsURL))
+        QueryResult(json: try await send("GET", nextRecordsURL, headers: queryHeaders))
+    }
+
+    // MARK: Bulk API 2.0
+
+    /// Starts a Bulk API 2.0 query job and returns its Id.
+    func startBulkQuery(_ soql: String, includeDeleted: Bool) async throws -> String {
+        var body = JSONObject()
+        body["operation"] = .string(includeDeleted ? "queryAll" : "query")
+        body["query"] = .string(soql)
+        body["contentType"] = .string("CSV")
+        body["columnDelimiter"] = .string("COMMA")
+        body["lineEnding"] = .string("LF")
+        let json = try await send("POST", "\(dataPath)/jobs/query", body: .object(body))
+        guard let id = json["id"]?.string else {
+            throw SalesforceError(statusCode: 200, errorCode: "", message: "Salesforce didn't return a Bulk API job Id.")
+        }
+        return id
+    }
+
+    /// A Bulk API 2.0 query job's state (UploadComplete, InProgress, JobComplete, Failed or
+    /// Aborted), how many records it has processed, and its error message if it failed.
+    func bulkQueryStatus(_ jobID: String) async throws -> (state: String, processed: Int, error: String?) {
+        let json = try await send("GET", "\(dataPath)/jobs/query/\(Self.pathEncoded(jobID))")
+        return (json["state"]?.string ?? "", json["numberRecordsProcessed"]?.int ?? 0, json["errorMessage"]?.string)
+    }
+
+    /// One page of a finished job's results as CSV, with its header row, and the locator for the
+    /// next page (nil after the last).
+    func bulkQueryResults(_ jobID: String, locator: String?, maxRecords: Int = 50_000) async throws -> (csv: Data, nextLocator: String?) {
+        var query = [URLQueryItem(name: "maxRecords", value: String(maxRecords))]
+        if let locator {
+            query.append(URLQueryItem(name: "locator", value: locator))
+        }
+        let (data, response) = try await sendRaw("GET", "\(dataPath)/jobs/query/\(Self.pathEncoded(jobID))/results", query: query, accept: "text/csv")
+        let next = response.value(forHTTPHeaderField: "Sforce-Locator")
+        return (data, next == nil || next == "null" || next?.isEmpty == true ? nil : next)
+    }
+
+    /// Stops a Bulk API 2.0 query job, e.g. when an export fails partway.
+    func abortBulkQuery(_ jobID: String) async {
+        var body = JSONObject()
+        body["state"] = .string("Aborted")
+        _ = try? await send("PATCH", "\(dataPath)/jobs/query/\(Self.pathEncoded(jobID))", body: .object(body))
     }
 
     /// Changes fields on a record. A null value clears the field.
@@ -191,12 +245,23 @@ actor SalesforceClient {
         try await send("GET", path, query: query)
     }
 
-    private func send(_ method: String, _ path: String, query: [URLQueryItem] = [], body: JSONValue? = nil) async throws -> JSONValue {
+    private func send(_ method: String, _ path: String, query: [URLQueryItem] = [], body: JSONValue? = nil, headers: [String: String] = [:]) async throws -> JSONValue {
+        let (data, response) = try await sendRaw(method, path, query: query, body: body, headers: headers)
+        if data.isEmpty { return .null }
+        guard let json = try? JSONValue.parse(data) else {
+            throw SalesforceError(statusCode: response.statusCode, errorCode: "", message: "Salesforce returned a response that isn't valid JSON.")
+        }
+        return json
+    }
+
+    /// Sends a request and returns the body as it came, trying once more with a fresh session if
+    /// the old one has expired. Throws for responses other than 2xx.
+    private func sendRaw(_ method: String, _ path: String, query: [URLQueryItem] = [], body: JSONValue? = nil, headers: [String: String] = [:], accept: String = "application/json") async throws -> (Data, HTTPURLResponse) {
         do {
-            return try await sendOnce(method, path, query: query, body: body)
+            return try await sendOnce(method, path, query: query, body: body, headers: headers, accept: accept)
         } catch let error as SalesforceError where error.isInvalidSession {
             session = try await reauthenticate()
-            return try await sendOnce(method, path, query: query, body: body)
+            return try await sendOnce(method, path, query: query, body: body, headers: headers, accept: accept)
         }
     }
 
@@ -204,7 +269,7 @@ actor SalesforceClient {
         s.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))) ?? s
     }
 
-    private func sendOnce(_ method: String, _ path: String, query: [URLQueryItem], body: JSONValue?) async throws -> JSONValue {
+    private func sendOnce(_ method: String, _ path: String, query: [URLQueryItem], body: JSONValue?, headers: [String: String], accept: String) async throws -> (Data, HTTPURLResponse) {
         guard var components = URLComponents(url: session.instanceURL, resolvingAgainstBaseURL: false) else {
             throw URLError(.badURL)
         }
@@ -217,7 +282,10 @@ actor SalesforceClient {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(accept, forHTTPHeaderField: "Accept")
+        for (name, value) in headers {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
         if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = Data(body.serialized.utf8)
@@ -229,15 +297,11 @@ actor SalesforceClient {
            let usage = limitInfo.split(separator: ",").first(where: { $0.hasPrefix("api-usage=") }) {
             apiUsage = String(usage.dropFirst("api-usage=".count))
         }
-        let status = http?.statusCode ?? 0
-        let json = data.isEmpty ? JSONValue.null : try? JSONValue.parse(data)
-        guard (200..<300).contains(status) else {
-            throw Self.error(from: json, status: status, data: data)
+        guard let http else { throw URLError(.badServerResponse) }
+        guard (200..<300).contains(http.statusCode) else {
+            throw Self.error(from: try? JSONValue.parse(data), status: http.statusCode, data: data)
         }
-        guard let json else {
-            throw SalesforceError(statusCode: status, errorCode: "", message: "Salesforce returned a response that isn't valid JSON.")
-        }
-        return json
+        return (data, http)
     }
 
     private static func error(from json: JSONValue?, status: Int, data: Data) -> SalesforceError {
