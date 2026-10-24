@@ -8,6 +8,7 @@ struct LoginView: View {
     @State private var selection: SFOrg.ID?
     @State private var isLoading = false
     @State private var loadError: String?
+    @State private var isLoggingIn = false
     @AppStorage("lastOrgUsername") private var lastOrgUsername = ""
 
     var body: some View {
@@ -15,7 +16,9 @@ struct LoginView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Connect to Salesforce")
                     .font(.title2.weight(.semibold))
-                Text("Choose an org you've logged in to with the Salesforce CLI.")
+                Text(BrowserLogin.consumerKey == nil
+                     ? "Choose an org you've logged in to with the Salesforce CLI."
+                     : "Choose an org you've logged in to with the Salesforce CLI or in the browser, or log in to another.")
                     .foregroundStyle(.secondary)
             }
 
@@ -39,7 +42,13 @@ struct LoginView: View {
                 }
                 .width(min: 80, ideal: 110)
             }
-            .contextMenu(forSelectionType: SFOrg.ID.self) { _ in
+            .contextMenu(forSelectionType: SFOrg.ID.self) { ids in
+                if let org = orgs.first(where: { ids.contains($0.id) }), org.isBrowserLogin {
+                    Button("Remove Saved Login") {
+                        BrowserLogin.remove(org.username)
+                        Task { await loadOrgs() }
+                    }
+                }
             } primaryAction: { ids in
                 if let id = ids.first { connect(id) }
             }
@@ -74,6 +83,10 @@ struct LoginView: View {
                     Text(model.statusText).foregroundStyle(.secondary)
                 }
                 Spacer()
+                if BrowserLogin.consumerKey != nil {
+                    Button("Log In with Browser…") { isLoggingIn = true }
+                        .disabled(model.isConnecting)
+                }
                 Button("Connect") {
                     if let selection { connect(selection) }
                 }
@@ -83,6 +96,15 @@ struct LoginView: View {
         }
         .padding(20)
         .frame(minWidth: 640, minHeight: 360)
+        .sheet(isPresented: $isLoggingIn) {
+            BrowserLoginSheet { login in
+                Task {
+                    await loadOrgs()
+                    selection = login.username
+                    connect(login.username)
+                }
+            }
+        }
         .task {
             await loadOrgs()
             connectFromLaunchArgument()
@@ -131,7 +153,19 @@ struct LoginView: View {
         loadError = nil
         defer { isLoading = false }
         do {
-            orgs = try await SFCLI.listOrgs()
+            let browserOrgs = BrowserLogin.savedLogins.map { login in
+                SFOrg(username: login.username, alias: nil, instanceURL: login.instanceURL, connectedStatus: "Saved login",
+                      kind: login.loginHost == "test.salesforce.com" ? "Sandbox" : "Browser", isDefault: false, isBrowserLogin: true)
+            }
+            // The CLI might not be installed if all the orgs are browser logins.
+            let cliOrgs: [SFOrg]
+            do {
+                cliOrgs = try await SFCLI.listOrgs()
+            } catch where !browserOrgs.isEmpty {
+                cliOrgs = []
+            }
+            let cliNames = Set(cliOrgs.map(\.username))
+            orgs = cliOrgs + browserOrgs.filter { !cliNames.contains($0.username) }
             if selection == nil || !orgs.contains(where: { $0.id == selection }) {
                 selection = orgs.first(where: { $0.username == lastOrgUsername })?.id
                     ?? orgs.first(where: \.isDefault)?.id
@@ -145,5 +179,71 @@ struct LoginView: View {
     private func connect(_ id: SFOrg.ID) {
         guard let org = orgs.first(where: { $0.id == id }), !model.isConnecting else { return }
         Task { await model.connect(to: org) }
+    }
+}
+
+/// Asks which Salesforce login page to use, then logs in there in the browser.
+private struct BrowserLoginSheet: View {
+    let onLogin: (BrowserLogin.SavedLogin) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var kind = "production"
+    @State private var domain = ""
+    @State private var isWorking = false
+    @State private var errorMessage: String?
+
+    private var host: String {
+        switch kind {
+        case "sandbox": "test.salesforce.com"
+        case "domain": BrowserLogin.normalizedHost(domain)
+        default: "login.salesforce.com"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Log In with Browser").font(.headline)
+            Picker("Log in to", selection: $kind) {
+                Text("Production or Developer Edition").tag("production")
+                Text("Sandbox").tag("sandbox")
+                Text("My Domain").tag("domain")
+            }
+            .pickerStyle(.radioGroup)
+            if kind == "domain" {
+                TextField("mycompany.my.salesforce.com", text: $domain)
+                    .textFieldStyle(.roundedBorder)
+            }
+            Text("Salesforce's login page opens in a browser window. SwiftSoql keeps the login in your Keychain.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let errorMessage {
+                Text(errorMessage).foregroundStyle(.red).font(.callout).textSelection(.enabled)
+            }
+            HStack {
+                if isWorking { ProgressView().controlSize(.small) }
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Log In") {
+                    isWorking = true
+                    errorMessage = nil
+                    Task {
+                        defer { isWorking = false }
+                        do {
+                            let login = try await BrowserLogin.logIn(host: host)
+                            dismiss()
+                            onLogin(login)
+                        } catch is CancellationError {
+                        } catch {
+                            errorMessage = error.localizedDescription
+                        }
+                    }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(isWorking || (kind == "domain" && host.isEmpty))
+            }
+        }
+        .padding(20)
+        .frame(width: 420)
     }
 }

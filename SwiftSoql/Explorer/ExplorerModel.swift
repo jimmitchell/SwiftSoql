@@ -150,7 +150,8 @@ final class ExplorerModel {
 
     /// Connects to an org the Salesforce CLI knows by username, e.g. when a window is restored.
     func connect(username: String) async {
-        await connect(to: SFOrg(username: username, alias: nil, instanceURL: "", connectedStatus: "", kind: "", isDefault: false))
+        await connect(to: SFOrg(username: username, alias: nil, instanceURL: "", connectedStatus: "", kind: "", isDefault: false,
+                                isBrowserLogin: BrowserLogin.isSaved(username)))
     }
 
     func connect(to org: SFOrg) async {
@@ -159,10 +160,11 @@ final class ExplorerModel {
         statusText = "Connecting to \(org.alias ?? org.username)…"
         do {
             let username = org.username
-            let session = try await SFCLI.session(for: username)
-            let client = SalesforceClient(session: session) {
-                try await SFCLI.session(for: username)
-            }
+            let newSession: @Sendable () async throws -> OrgSession = org.isBrowserLogin
+                ? { @Sendable in try await BrowserLogin.session(for: username) }
+                : { @Sendable in try await SFCLI.session(for: username) }
+            let session = try await newSession()
+            let client = SalesforceClient(session: session, reauthenticate: newSession)
             // The global describe doubles as a check that the session works.
             let types = try await client.describeGlobal()
             self.session = session

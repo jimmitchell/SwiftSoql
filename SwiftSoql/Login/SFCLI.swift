@@ -8,6 +8,8 @@ nonisolated struct SFOrg: Sendable, Identifiable, Hashable {
     let connectedStatus: String
     let kind: String
     let isDefault: Bool
+    /// Whether the org was logged in to through the Salesforce CLI or in the browser by SwiftSoql.
+    var isBrowserLogin = false
 
     var id: String { username }
     var isConnected: Bool { connectedStatus == "Connected" || connectedStatus == "Active" }

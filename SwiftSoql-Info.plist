@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Sparkle: where updates are announced, and the public key their archives are signed with. -->
+	<key>SUFeedURL</key>
+	<string>https://github.com/jimmitchell/SwiftSoql/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>Dzdhb/kwHxFz4yMyDKG/O549Yg1905YIVpZcLXiwq74=</string>
+	<!-- The consumer key of the Salesforce External Client App used for browser login. Leave
+	     empty to offer only the orgs the Salesforce CLI knows. -->
+	<key>SalesforceConsumerKey</key>
+	<string></string>
+</dict>
+</plist>

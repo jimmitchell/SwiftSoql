@@ -1,7 +1,12 @@
+import Sparkle
 import SwiftUI
 
 @main
 struct SwiftSoqlApp: App {
+    /// Checks for and installs updates, from the appcast in Info.plist's SUFeedURL. Not started
+    /// while testing.
+    private let updater = SPUStandardUpdaterController(startingUpdater: !AppDefaults.isTesting, updaterDelegate: nil, userDriverDelegate: nil)
+
     init() {
         // The same defaults as SoqlXplorer.
         AppDefaults.store.register(defaults: [
@@ -24,6 +29,9 @@ struct SwiftSoqlApp: App {
         }
         .defaultSize(width: 1200, height: 800)
         .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") { updater.checkForUpdates(nil) }
+            }
             FileCommands()
             QueryCommands()
         }
