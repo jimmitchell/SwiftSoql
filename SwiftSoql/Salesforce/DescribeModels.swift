@@ -63,6 +63,25 @@ nonisolated struct FieldDescribe: Sendable, Identifiable {
     var aggregatable: Bool { json["aggregatable"]?.bool ?? false }
     var groupable: Bool { json["groupable"]?.bool ?? false }
     var updateable: Bool { json["updateable"]?.bool ?? false }
+    var nameField: Bool { json["nameField"]?.bool ?? false }
+    var externalId: Bool { json["externalId"]?.bool ?? false }
+
+    /// How central the field is to the SObject, lowest first: Id, then the name field, external
+    /// Ids, ordinary fields, owner-style references, and audit fields. From SoqlXplorer.
+    var importance: Int {
+        if name == "Id" { return 1 }
+        if nameField { return 2 }
+        if externalId { return 3 }
+        if type == "reference", referenceTo.contains("User") {
+            return referenceTo.count == 1 ? 6 : 5
+        }
+        switch name {
+        case "CreatedDate": return 7
+        case "LastModifiedDate": return 8
+        case "SystemModstamp": return 9
+        default: return 4
+        }
+    }
     /// A polymorphic relationship whose related record's fields come from the Name SObject.
     var namePointing: Bool { json["namePointing"]?.bool ?? false }
 

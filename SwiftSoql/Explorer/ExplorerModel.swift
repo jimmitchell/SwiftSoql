@@ -29,6 +29,7 @@ enum SchemaItem: Hashable {
 enum Workspace: String, CaseIterable, Identifiable {
     case query = "Query"
     case apex = "Apex"
+    case schema = "Schema"
 
     var id: String { rawValue }
 }
@@ -61,6 +62,8 @@ final class ExplorerModel {
     var results: ResultSet?
     /// A subquery result opened from a cell of `results`.
     var childResults: ResultSet?
+    /// Queries run in this org, newest first.
+    private(set) var recentQueries: [String] = []
     /// The fields picked by double-clicking in the schema sidebar, for building a query.
     private var pickedFields: (sobject: String, fields: [String])?
 
@@ -71,6 +74,11 @@ final class ExplorerModel {
     @ObservationIgnored private var pendingSchemaObjects: Set<String> = []
     @ObservationIgnored private var sobjectNames: Set<String> = []
 
+    // Files
+    /// Set by the File menu to show the open or save panel.
+    var isOpeningFile = false
+    var isSavingFile = false
+
     // Anonymous Apex
     var workspace = Workspace.query
     let apex = ApexModel()
@@ -79,7 +87,11 @@ final class ExplorerModel {
 
     /// Whether the Run command can run what the current workspace shows.
     var canRun: Bool {
-        isConnected && (workspace == .query ? !isQuerying : !apex.isRunning)
+        switch workspace {
+        case .query: isConnected && !isQuerying
+        case .apex: isConnected && !apex.isRunning
+        case .schema: false
+        }
     }
 
     /// Runs the query or the anonymous Apex, depending on the workspace.
@@ -87,6 +99,7 @@ final class ExplorerModel {
         switch workspace {
         case .query: await runQuery(includeDeleted: includeDeleted)
         case .apex: await executeApex()
+        case .schema: break
         }
     }
 
@@ -98,6 +111,11 @@ final class ExplorerModel {
             self.error = DisplayedError("Unable to run Apex", error)
         }
         await refreshAPIUsage()
+    }
+
+    /// Connects to an org the Salesforce CLI knows by username, e.g. when a window is restored.
+    func connect(username: String) async {
+        await connect(to: SFOrg(username: username, alias: nil, instanceURL: "", connectedStatus: "", kind: "", isDefault: false))
     }
 
     func connect(to org: SFOrg) async {
@@ -117,6 +135,7 @@ final class ExplorerModel {
             sobjects = types.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
             sobjectNames = Set(sobjects.map { $0.name.lowercased() })
             statusText = "Connected, \(sobjects.count) SObject types"
+            recentQueries = UserDefaults.standard.stringArray(forKey: recentQueriesKey) ?? []
             await refreshAPIUsage()
             UserDefaults.standard.set(username, forKey: "lastOrgUsername")
         } catch {
@@ -136,6 +155,7 @@ final class ExplorerModel {
         results = nil
         childResults = nil
         pickedFields = nil
+        recentQueries = []
         schemaObjects = [:]
         pendingSchemaObjects = []
         sobjectNames = []
@@ -212,6 +232,7 @@ final class ExplorerModel {
         do {
             let result = try await client.query(text, includeDeleted: includeDeleted)
             let time = Self.elapsed(since: started)
+            addRecentQuery(text)
             childResults = nil
             if result.records.isEmpty {
                 results = nil
@@ -228,6 +249,34 @@ final class ExplorerModel {
             self.error = DisplayedError("Query failed", error)
         }
         await refreshAPIUsage()
+    }
+
+    // MARK: - Recent queries
+
+    private var recentQueriesKey: String { "recentQueries-\(session?.username ?? "")" }
+
+    private func addRecentQuery(_ text: String) {
+        recentQueries.removeAll { $0 == text }
+        recentQueries.insert(text, at: 0)
+        let limit = max(1, UserDefaults.standard.integer(forKey: "maxRecentQueries"))
+        if recentQueries.count > limit {
+            recentQueries.removeLast(recentQueries.count - limit)
+        }
+        UserDefaults.standard.set(recentQueries, forKey: recentQueriesKey)
+    }
+
+    func removeRecentQueries(_ queries: Set<String>) {
+        recentQueries.removeAll { queries.contains($0) }
+        UserDefaults.standard.set(recentQueries, forKey: recentQueriesKey)
+    }
+
+    /// Puts a recent query in the editor, optionally running it.
+    func useRecentQuery(_ text: String, run: Bool) async {
+        soql = text
+        workspace = .query
+        if run {
+            await runQuery()
+        }
     }
 
     /// Fetches the next batch of rows for the current results.

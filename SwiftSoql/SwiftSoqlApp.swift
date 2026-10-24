@@ -10,15 +10,17 @@ struct SwiftSoqlApp: App {
             "soqlSyntaxHighlighting": true,
             "soqlPopupCompletions": true,
             "soqlUppercaseKeywords": true,
+            "maxRecentQueries": 25,
         ])
     }
 
     var body: some Scene {
-        WindowGroup {
-            ContentView()
+        WindowGroup(for: WindowOrg.self) { $windowOrg in
+            ContentView(windowOrg: $windowOrg)
         }
         .defaultSize(width: 1200, height: 800)
         .commands {
+            FileCommands()
             QueryCommands()
         }
 
@@ -31,6 +33,36 @@ struct SwiftSoqlApp: App {
 extension FocusedValues {
     /// The model of the frontmost explorer window, for menu commands.
     @Entry var explorerModel: ExplorerModel?
+}
+
+struct FileCommands: Commands {
+    @FocusedValue(\.explorerModel) private var model
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        CommandGroup(after: .newItem) {
+            Button("New Window for \(model?.session?.displayName ?? "This Org")") {
+                openWindow(value: WindowOrg(username: model?.session?.username))
+            }
+            .keyboardShortcut("n", modifiers: [.command, .option])
+            .disabled(model?.session == nil)
+
+            Divider()
+
+            Button("Open…") {
+                model?.isOpeningFile = true
+            }
+            .keyboardShortcut("o")
+            .disabled(model?.isConnected != true)
+        }
+        CommandGroup(replacing: .saveItem) {
+            Button(model?.workspace == .apex ? "Save Apex…" : "Save Query…") {
+                model?.isSavingFile = true
+            }
+            .keyboardShortcut("s")
+            .disabled(model?.isConnected != true || model?.workspace == .schema)
+        }
+    }
 }
 
 struct QueryCommands: Commands {
@@ -55,6 +87,7 @@ struct QueryCommands: Commands {
             Picker("Workspace", selection: Binding { model?.workspace ?? .query } set: { model?.workspace = $0 }) {
                 Text("Query").tag(Workspace.query).keyboardShortcut("1", modifiers: .command)
                 Text("Anonymous Apex").tag(Workspace.apex).keyboardShortcut("2", modifiers: .command)
+                Text("Schema Diagram").tag(Workspace.schema).keyboardShortcut("3", modifiers: .command)
             }
             .pickerStyle(.inline)
             .disabled(model?.isConnected != true)
@@ -83,6 +116,7 @@ struct SettingsView: View {
     @AppStorage("soqlUppercaseKeywords") private var uppercaseKeywords = true
     @AppStorage("sortFieldsInGeneratedQueries") private var sortGeneratedFields = true
     @AppStorage("skipCompoundFieldsInGeneratedQueries") private var skipCompoundFields = false
+    @AppStorage("maxRecentQueries") private var maxRecentQueries = 25
 
     var body: some View {
         Form {
@@ -96,6 +130,9 @@ struct SettingsView: View {
             Section("Generated Queries") {
                 Toggle("Sort fields alphabetically", isOn: $sortGeneratedFields)
                 Toggle("Use address parts instead of compound address fields", isOn: $skipCompoundFields)
+            }
+            Section("Recent Queries") {
+                Stepper("Remember the last \(maxRecentQueries) queries for each org", value: $maxRecentQueries, in: 5...200, step: 5)
             }
         }
         .formStyle(.grouped)
