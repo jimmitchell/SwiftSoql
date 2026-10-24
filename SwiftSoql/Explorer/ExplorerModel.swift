@@ -112,7 +112,7 @@ final class ExplorerModel {
     var isConnected: Bool { client != nil }
 
     init() {
-        let defaults = UserDefaults.standard
+        let defaults = AppDefaults.store
         let saved = defaults.stringArray(forKey: "queryTabs") ?? [defaults.string(forKey: "soql") ?? "SELECT Id, Name FROM Account"]
         let restored = (saved.isEmpty ? [""] : saved).map { QueryTab(soql: $0) }
         let selected = min(max(0, defaults.integer(forKey: "selectedQueryTab")), restored.count - 1)
@@ -172,11 +172,11 @@ final class ExplorerModel {
             sobjectsByKeyPrefix = Dictionary(sobjects.compactMap { s in s.keyPrefix.map { ($0, s.name) } }, uniquingKeysWith: { a, _ in a })
             statusText = "Connected, \(sobjects.count) SObject types"
             currentTab.statusText = statusText
-            recentQueries = UserDefaults.standard.stringArray(forKey: recentQueriesKey) ?? []
-            pinnedQueries = UserDefaults.standard.stringArray(forKey: pinnedQueriesKey) ?? []
+            recentQueries = AppDefaults.store.stringArray(forKey: recentQueriesKey) ?? []
+            pinnedQueries = AppDefaults.store.stringArray(forKey: pinnedQueriesKey) ?? []
             startBackgroundDescribes()
             await refreshAPIUsage()
-            UserDefaults.standard.set(username, forKey: "lastOrgUsername")
+            AppDefaults.store.set(username, forKey: "lastOrgUsername")
         } catch {
             statusText = ""
             self.error = DisplayedError("Unable to connect to \(org.alias ?? org.username)", error)
@@ -255,7 +255,7 @@ final class ExplorerModel {
     /// all of them. SoqlXplorer does the same. Describes the UI asks for go ahead separately.
     private func startBackgroundDescribes() {
         backgroundDescribes?.cancel()
-        guard UserDefaults.standard.bool(forKey: "describeAllInBackground"), let client else { return }
+        guard AppDefaults.store.bool(forKey: "describeAllInBackground"), let client else { return }
         backgroundDescribes = Task { await describeAll(using: client) }
     }
 
@@ -436,8 +436,8 @@ final class ExplorerModel {
 
     /// Remembers the tabs' queries for the next window.
     private func saveTabs() {
-        UserDefaults.standard.set(tabs.map(\.soql), forKey: "queryTabs")
-        UserDefaults.standard.set(tabs.firstIndex { $0.id == selectedTabID } ?? 0, forKey: "selectedQueryTab")
+        AppDefaults.store.set(tabs.map(\.soql), forKey: "queryTabs")
+        AppDefaults.store.set(tabs.firstIndex { $0.id == selectedTabID } ?? 0, forKey: "selectedQueryTab")
     }
 
     // MARK: - Recent queries
@@ -455,12 +455,12 @@ final class ExplorerModel {
 
     /// Saves the recent and pinned queries, keeping only as many recent ones as Settings allows.
     private func saveQueries() {
-        let limit = max(1, UserDefaults.standard.integer(forKey: "maxRecentQueries"))
+        let limit = max(1, AppDefaults.store.integer(forKey: "maxRecentQueries"))
         if recentQueries.count > limit {
             recentQueries.removeLast(recentQueries.count - limit)
         }
-        UserDefaults.standard.set(recentQueries, forKey: recentQueriesKey)
-        UserDefaults.standard.set(pinnedQueries, forKey: pinnedQueriesKey)
+        AppDefaults.store.set(recentQueries, forKey: recentQueriesKey)
+        AppDefaults.store.set(pinnedQueries, forKey: pinnedQueriesKey)
     }
 
     /// Removes recent or pinned queries.
@@ -720,7 +720,7 @@ final class ExplorerModel {
         }
         pickedFields = (describe.name, fields)
 
-        let defaults = UserDefaults.standard
+        let defaults = AppDefaults.store
         if defaults.bool(forKey: "sortFieldsInGeneratedQueries") {
             fields.sort { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
         }

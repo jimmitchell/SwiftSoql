@@ -47,7 +47,7 @@ struct QueryWorkspace: View {
                         model.childResults?.sortOrder ?? []
                     } set: {
                         model.childResults?.sort(by: $0)
-                    })
+                    }, accessibilityID: "childResults")
                 }
                 .frame(minHeight: 100, idealHeight: 220)
             }

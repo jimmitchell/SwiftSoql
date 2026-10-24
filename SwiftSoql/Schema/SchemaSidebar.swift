@@ -78,6 +78,7 @@ private struct SchemaOutline: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSScrollView {
         let outline = NSOutlineView()
+        outline.setAccessibilityIdentifier("schemaSidebar")
         let column = NSTableColumn(identifier: .init("name"))
         column.resizingMask = .autoresizingMask
         outline.addTableColumn(column)

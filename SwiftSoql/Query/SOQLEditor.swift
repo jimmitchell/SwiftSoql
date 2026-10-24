@@ -25,6 +25,8 @@ struct SOQLEditor: NSViewRepresentable {
         textView.textContainer?.widthTracksTextView = true
         textView.delegate = context.coordinator
         textView.configureForCode()
+        textView.setAccessibilityIdentifier("soqlEditor")
+        textView.setAccessibilityLabel("SOQL query")
         textView.completionsProvider = { [weak coordinator = context.coordinator] range in
             coordinator?.completions.completions(in: range) ?? []
         }
@@ -104,7 +106,7 @@ struct SOQLEditor: NSViewRepresentable {
         func colorize(_ textView: NSTextView) {
             colorizedGeneration = parent.schemaGeneration
             guard let storage = textView.textStorage else { return }
-            let defaults = UserDefaults.standard
+            let defaults = AppDefaults.store
             guard defaults.bool(forKey: "soqlSyntaxHighlighting") else {
                 if coloredLastTime {
                     storage.beginEditing()

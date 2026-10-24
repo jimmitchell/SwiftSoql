@@ -12,6 +12,8 @@ struct ApexEditor: NSViewRepresentable {
         scrollView.borderType = .noBorder
         let textView = scrollView.documentView as! NSTextView
         textView.configureForCode()
+        textView.setAccessibilityIdentifier("apexEditor")
+        textView.setAccessibilityLabel("Anonymous Apex")
         textView.delegate = context.coordinator
         textView.string = text
         context.coordinator.parent = self

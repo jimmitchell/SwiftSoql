@@ -12,6 +12,8 @@ struct ResultsTable: View {
     var checkedRows: Binding<Set<ResultRow.ID>>?
     /// How the rows are sorted. Clicking a column header changes it.
     var sortOrder: Binding<[ResultSortComparator]>
+    /// Identifies the table for UI tests.
+    var accessibilityID = "results"
     /// Called when a subquery cell is clicked.
     var onOpenChild: (QueryResult, String, ResultRow.ID) -> Void = { _, _, _ in }
 
@@ -68,6 +70,7 @@ struct ResultsTable: View {
         }
         // A new result set can have entirely different columns, so start the table afresh.
         .id(resultSet.id)
+        .accessibilityIdentifier(accessibilityID)
         .contextMenu(forSelectionType: ResultRow.ID.self) { ids in
             Button("Copy") { copy(ids, includeHeader: false) }
                 .disabled(ids.isEmpty)

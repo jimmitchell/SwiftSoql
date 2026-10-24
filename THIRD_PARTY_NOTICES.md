@@ -2,7 +2,7 @@
 
 SwiftSoql is a SwiftUI port of [SoqlXplorer](https://github.com/superfell/SoqlX). Parts of it are
 translated from SoqlXplorer and from [ZKParser](https://github.com/superfell/ZKParser), and the
-SOQL test data in `Tests/SoqlGolden/golden` and the colors in `Assets.xcassets/Syntax` and
+SOQL test data in `SwiftSoqlTests/Golden` and the colors in `Assets.xcassets/Syntax` and
 `Assets.xcassets/Schema` are copied from SoqlXplorer. Both projects are by Simon Fell and are used under the MIT license below.
 
 ## SoqlXplorer

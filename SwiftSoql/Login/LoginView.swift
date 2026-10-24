@@ -96,7 +96,7 @@ struct LoginView: View {
     private static var launchArgumentHandled = false
 
     private func connectFromLaunchArgument() {
-        let defaults = UserDefaults.standard
+        let defaults = AppDefaults.store
         guard !Self.launchArgumentHandled, let target = defaults.string(forKey: "connect") else { return }
         Self.launchArgumentHandled = true
         guard let org = orgs.first(where: { $0.alias == target || $0.username == target }) else { return }

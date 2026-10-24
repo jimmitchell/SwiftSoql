@@ -4,7 +4,7 @@ import Observation
 /// The anonymous Apex workspace: the code, the log levels, and the runs so far, newest first.
 @Observable
 final class ApexModel {
-    var code = UserDefaults.standard.string(forKey: "apex") ?? "System.debug('Hello from ' + UserInfo.getUserName());"
+    var code = AppDefaults.store.string(forKey: "apex") ?? "System.debug('Hello from ' + UserInfo.getUserName());"
     private(set) var runs: [ApexExecution] = []
     var selectedRunID: ApexExecution.ID?
     private(set) var isRunning = false
@@ -16,7 +16,7 @@ final class ApexModel {
     var logLevels: [ApexLogCategory: ApexLogLevel] {
         didSet {
             for (category, level) in logLevels {
-                UserDefaults.standard.set(level.rawValue, forKey: Self.defaultsKey(category))
+                AppDefaults.store.set(level.rawValue, forKey: Self.defaultsKey(category))
             }
         }
     }
@@ -24,7 +24,7 @@ final class ApexModel {
     init() {
         var levels: [ApexLogCategory: ApexLogLevel] = [:]
         for category in ApexLogCategory.allCases {
-            levels[category] = UserDefaults.standard.string(forKey: Self.defaultsKey(category)).flatMap(ApexLogLevel.init) ?? category.defaultLevel
+            levels[category] = AppDefaults.store.string(forKey: Self.defaultsKey(category)).flatMap(ApexLogLevel.init) ?? category.defaultLevel
         }
         logLevels = levels
     }
@@ -49,7 +49,7 @@ final class ApexModel {
         guard !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !isRunning else { return }
         isRunning = true
         defer { isRunning = false }
-        UserDefaults.standard.set(code, forKey: "apex")
+        AppDefaults.store.set(code, forKey: "apex")
         let run = try await client.executeAnonymous(code, logLevels: logLevels)
         runs.insert(run, at: 0)
         selectedRunID = run.id

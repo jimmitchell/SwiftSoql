@@ -96,6 +96,7 @@ struct ApexWorkspace: View {
                         .help(details(run))
                 }
             }
+            .accessibilityIdentifier("apexRuns")
             .contextMenu(forSelectionType: ApexExecution.ID.self) { ids in
                 Button("Restore Code") {
                     if let run = apex.runs.first(where: { ids.contains($0.id) }) {
@@ -145,6 +146,7 @@ struct ApexWorkspace: View {
                 Divider()
             }
             LogTextView(text: apex.displayedLog)
+                .accessibilityIdentifier("debugLog")
                 .overlay {
                     if let run = apex.selectedRun, run.debugLog.isEmpty {
                         ContentUnavailableView("No Debug Log", systemImage: "doc.plaintext", description: Text(run.compiled ? "Turn up the log levels in the toolbar to see more." : "Code that doesn't compile doesn't run, so there's no log."))

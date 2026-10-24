@@ -13,7 +13,12 @@ final class SOQLTextView: NSTextView {
 
     private lazy var completionsTable: NSTableView = {
         let table = NSTableView()
-        table.addTableColumn(NSTableColumn(identifier: .init("completion")))
+        // One column that fills the popover, so long names aren't cut off.
+        let column = NSTableColumn(identifier: .init("completion"))
+        column.width = 300
+        column.resizingMask = .autoresizingMask
+        table.addTableColumn(column)
+        table.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
         table.headerView = nil
         table.rowHeight = 22
         table.style = .plain

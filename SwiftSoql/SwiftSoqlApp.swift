@@ -4,7 +4,7 @@ import SwiftUI
 struct SwiftSoqlApp: App {
     init() {
         // The same defaults as SoqlXplorer.
-        UserDefaults.standard.register(defaults: [
+        AppDefaults.store.register(defaults: [
             "sortFieldsInGeneratedQueries": true,
             "skipCompoundFieldsInGeneratedQueries": false,
             "soqlSyntaxHighlighting": true,
@@ -18,6 +18,7 @@ struct SwiftSoqlApp: App {
     var body: some Scene {
         WindowGroup(for: WindowOrg.self) { $windowOrg in
             ContentView(windowOrg: $windowOrg)
+                .defaultAppStorage(AppDefaults.store)
         }
         .defaultSize(width: 1200, height: 800)
         .commands {
@@ -27,6 +28,7 @@ struct SwiftSoqlApp: App {
 
         Settings {
             SettingsView()
+                .defaultAppStorage(AppDefaults.store)
         }
     }
 }

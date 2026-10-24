@@ -79,6 +79,8 @@ private struct TabButton: View {
         .onHover { isHovering = $0 }
         .help(tab.soql)
         .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("queryTab")
+        .accessibilityLabel(tab.title)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 }

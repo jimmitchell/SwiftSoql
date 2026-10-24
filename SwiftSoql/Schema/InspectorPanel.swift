@@ -53,6 +53,7 @@ struct RecentQueriesList: View {
                 row(query, isPinned: false)
             }
         }
+        .accessibilityIdentifier("recentQueries")
         .contextMenu(forSelectionType: String.self) { queries in
             let pinned = queries.filter(model.pinnedQueries.contains)
             let recent = queries.subtracting(pinned)
