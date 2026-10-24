@@ -57,6 +57,11 @@ nonisolated struct FieldDescribe: Sendable, Identifiable {
         relationshipName = json["relationshipName"]?.string
     }
 
+    var aggregatable: Bool { json["aggregatable"]?.bool ?? false }
+    var groupable: Bool { json["groupable"]?.bool ?? false }
+    /// A polymorphic relationship whose related record's fields come from the Name SObject.
+    var namePointing: Bool { json["namePointing"]?.bool ?? false }
+
     /// Address and geolocation fields that also have individual component fields.
     var isCompound: Bool { type == "address" || type == "location" }
 

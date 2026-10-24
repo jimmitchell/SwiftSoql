@@ -7,6 +7,9 @@ struct SwiftSoqlApp: App {
         UserDefaults.standard.register(defaults: [
             "sortFieldsInGeneratedQueries": true,
             "skipCompoundFieldsInGeneratedQueries": false,
+            "soqlSyntaxHighlighting": true,
+            "soqlPopupCompletions": true,
+            "soqlUppercaseKeywords": true,
         ])
     }
 
@@ -17,6 +20,10 @@ struct SwiftSoqlApp: App {
         .defaultSize(width: 1200, height: 800)
         .commands {
             QueryCommands()
+        }
+
+        Settings {
+            SettingsView()
         }
     }
 }
@@ -51,5 +58,32 @@ struct QueryCommands: Commands {
             .keyboardShortcut("m", modifiers: [.command, .shift])
             .disabled(model?.canLoadMore != true || model?.isQuerying == true)
         }
+    }
+}
+
+struct SettingsView: View {
+    @AppStorage("soqlSyntaxHighlighting") private var syntaxHighlighting = true
+    @AppStorage("soqlPopupCompletions") private var popupCompletions = true
+    @AppStorage("soqlUppercaseKeywords") private var uppercaseKeywords = true
+    @AppStorage("sortFieldsInGeneratedQueries") private var sortGeneratedFields = true
+    @AppStorage("skipCompoundFieldsInGeneratedQueries") private var skipCompoundFields = false
+
+    var body: some View {
+        Form {
+            Section("Query Editor") {
+                Toggle("Highlight syntax and check queries", isOn: $syntaxHighlighting)
+                Toggle("Show completions while typing", isOn: $popupCompletions)
+                    .disabled(!syntaxHighlighting)
+                Toggle("Make keywords uppercase", isOn: $uppercaseKeywords)
+                    .disabled(!syntaxHighlighting)
+            }
+            Section("Generated Queries") {
+                Toggle("Sort fields alphabetically", isOn: $sortGeneratedFields)
+                Toggle("Use address parts instead of compound address fields", isOn: $skipCompoundFields)
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: 460)
+        .fixedSize()
     }
 }

@@ -52,6 +52,13 @@ final class ExplorerModel {
     /// The fields picked by double-clicking in the schema sidebar, for building a query.
     private var pickedFields: (sobject: String, fields: [String])?
 
+    // SOQL editor
+    /// Changes when a describe the SOQL editor asked for arrives, so it can recheck the query.
+    private(set) var schemaGeneration = 0
+    @ObservationIgnored private var schemaObjects: [String: SoqlSchemaObject] = [:]
+    @ObservationIgnored private var pendingSchemaObjects: Set<String> = []
+    @ObservationIgnored private var sobjectNames: Set<String> = []
+
     var isConnected: Bool { client != nil }
 
     func connect(to org: SFOrg) async {
@@ -69,6 +76,7 @@ final class ExplorerModel {
             self.session = session
             self.client = client
             sobjects = types.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            sobjectNames = Set(sobjects.map { $0.name.lowercased() })
             statusText = "Connected, \(sobjects.count) SObject types"
             await refreshAPIUsage()
             UserDefaults.standard.set(username, forKey: "lastOrgUsername")
@@ -89,6 +97,9 @@ final class ExplorerModel {
         results = nil
         childResults = nil
         pickedFields = nil
+        schemaObjects = [:]
+        pendingSchemaObjects = []
+        sobjectNames = []
         statusText = ""
         apiUsage = nil
     }
@@ -246,6 +257,36 @@ final class ExplorerModel {
             fields.removeAll { parts.contains($0) }
         }
         soql = fields.isEmpty ? "SELECT FROM \(describe.name)" : "SELECT \(fields.joined(separator: ", ")) FROM \(describe.name)"
+    }
+}
+
+extension ExplorerModel: SoqlDescriber {
+    func schemaObject(_ sobject: String) -> SoqlSchemaObject? {
+        let key = sobject.lowercased()
+        if let obj = schemaObjects[key] { return obj }
+        if let describe = cachedDescribe(sobject) {
+            let obj = SoqlSchemaObject(describe)
+            schemaObjects[key] = obj
+            return obj
+        }
+        // Fetch it in the background; the editor rechecks the query when it arrives.
+        if knownSObject(sobject), pendingSchemaObjects.insert(key).inserted {
+            Task {
+                if (try? await describe(sobject)) != nil {
+                    schemaGeneration += 1
+                }
+                pendingSchemaObjects.remove(key)
+            }
+        }
+        return nil
+    }
+
+    func knownSObject(_ sobject: String) -> Bool {
+        sobjectNames.contains(sobject.lowercased())
+    }
+
+    var allQueryableSObjects: [String] {
+        sobjects.filter(\.queryable).map(\.name)
     }
 }
 

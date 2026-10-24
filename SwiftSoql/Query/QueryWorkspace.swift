@@ -10,7 +10,7 @@ struct QueryWorkspace: View {
 
     var body: some View {
         VSplitView {
-            SOQLEditor(text: $model.soql)
+            SOQLEditor(text: $model.soql, describer: model, schemaGeneration: model.schemaGeneration)
                 .frame(minHeight: 60, idealHeight: 140)
 
             VStack(spacing: 0) {
