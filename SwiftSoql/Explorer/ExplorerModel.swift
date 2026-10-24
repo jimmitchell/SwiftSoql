@@ -195,11 +195,15 @@ final class ExplorerModel {
         if let cached = describes[key] { return cached }
         if let pending = describesInFlight[key] { return try await pending.value }
         guard let client else { throw CancellationError() }
-        let task = Task { try await client.describe(sobject) }
+        // The task caches the describe itself, so it's cached before any caller sees it.
+        let task = Task {
+            defer { describesInFlight[key] = nil }
+            let result = try await client.describe(sobject)
+            describes[key] = result
+            return result
+        }
         describesInFlight[key] = task
-        defer { describesInFlight[key] = nil }
         let result = try await task.value
-        describes[key] = result
         await refreshAPIUsage()
         return result
     }
@@ -457,14 +461,16 @@ final class ExplorerModel {
 
     // MARK: - Editing
 
-    /// The fields of a result row's SObject type that can be edited, once it has been described.
-    func editableFields(of row: ResultRow) -> Set<String> {
-        guard row.recordID != nil, let type = row.record.sobjectType else { return [] }
-        return cachedDescribe(type)?.updateableFields ?? []
+    /// The field a results cell shows, if it can be edited: a top-level field the user may
+    /// update, once the row's SObject type has been described.
+    func editableField(_ column: String, of row: ResultRow) -> FieldDescribe? {
+        guard column != "Id", row.recordID != nil, let type = row.record.sobjectType,
+              let field = cachedDescribe(type)?.field(exactly: column), field.updateable else { return nil }
+        return field
     }
 
-    /// Saves text typed into a results cell to the record, and updates the results to match.
-    /// Returns whether the change was saved.
+    /// Saves text typed into a results cell to the record, and updates the results to show the
+    /// value Salesforce saved. Returns whether the change was saved.
     @discardableResult
     func saveEdit(_ text: String, field: String, row: ResultRow) async -> Bool {
         guard let client, let id = row.recordID, let type = row.record.sobjectType else { return false }
@@ -480,9 +486,13 @@ final class ExplorerModel {
             var fields = JSONObject()
             fields[fieldDescribe.name] = value
             try await client.update(type, id: id, fields: fields)
-            results?.applyUpdate(recordID: id, field: field, value: value)
-            childResults?.applyUpdate(recordID: id, field: field, value: value)
-            statusText = "Updated \(field) on \(id)"
+            // Salesforce can store something else, e.g. a trigger can change the value or turn
+            // a Task's reminder back off, so show what it kept.
+            let saved = (try? await client.query("SELECT \(fieldDescribe.name) FROM \(type) WHERE Id = '\(id)'"))?
+                .records.first?[fieldDescribe.name] ?? value
+            results?.applyUpdate(recordID: id, field: field, value: saved)
+            childResults?.applyUpdate(recordID: id, field: field, value: saved)
+            statusText = saved == value ? "Updated \(field) on \(id)" : "Updated \(field) on \(id); Salesforce saved \(saved.displayText ?? "an empty value")"
             await refreshAPIUsage()
             return true
         } catch {

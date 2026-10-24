@@ -32,6 +32,7 @@ nonisolated struct SObjectDescribe: Sendable {
     let childRelationships: [ChildRelationship]
     /// The names of the fields that can be changed on existing records.
     let updateableFields: Set<String>
+    private let fieldIndexes: [String: Int]
 
     init(json: JSONObject) {
         var json = json
@@ -44,6 +45,12 @@ nonisolated struct SObjectDescribe: Sendable {
         fields = fieldsJSON.map(FieldDescribe.init)
         childRelationships = relationshipsJSON.map(ChildRelationship.init)
         updateableFields = Set(fields.filter(\.updateable).map(\.name))
+        fieldIndexes = Dictionary(fields.enumerated().map { ($1.name, $0) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    /// The field with exactly this name, as query results spell it. Faster than `field(named:)`.
+    func field(exactly name: String) -> FieldDescribe? {
+        fieldIndexes[name].map { fields[$0] }
     }
 
     private static func pruned(_ obj: JSONObject) -> JSONObject {
@@ -90,6 +97,7 @@ nonisolated struct FieldDescribe: Sendable, Identifiable {
     var aggregatable: Bool { json["aggregatable"]?.bool ?? false }
     var groupable: Bool { json["groupable"]?.bool ?? false }
     var updateable: Bool { json["updateable"]?.bool ?? false }
+    var nillable: Bool { json["nillable"]?.bool ?? false }
     var nameField: Bool { json["nameField"]?.bool ?? false }
     var externalId: Bool { json["externalId"]?.bool ?? false }
 

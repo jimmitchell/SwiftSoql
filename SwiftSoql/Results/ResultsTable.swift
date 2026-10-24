@@ -142,8 +142,8 @@ struct ResultsTable: View {
             }
             .buttonStyle(.link)
             .help("Show these rows below")
-        } else if resultSet.isEditable, column != "Id", model.editableFields(of: row).contains(column) {
-            EditableCell(value: value?.displayText ?? "", isDisabled: model.isSaving) { text in
+        } else if resultSet.isEditable, let field = model.editableField(column, of: row) {
+            FieldEditor(field: field, value: value, isDisabled: model.isSaving) { text in
                 await model.saveEdit(text, field: column, row: row)
             }
         } else {
@@ -156,51 +156,5 @@ struct ResultsTable: View {
     private func copy(_ ids: Set<ResultRow.ID>, includeHeader: Bool) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(ResultsExport.tabSeparated(resultSet, rowIDs: ids, includeHeader: includeHeader), forType: .string)
-    }
-}
-
-/// A results cell that saves its value when editing ends with Return or by moving elsewhere.
-/// Escape puts the value back.
-private struct EditableCell: View {
-    let value: String
-    var isDisabled = false
-    /// Saves the text, returning whether it was saved.
-    let save: (String) async -> Bool
-
-    @State private var draft = ""
-    @State private var isSavingDraft = false
-    @FocusState private var isFocused: Bool
-
-    var body: some View {
-        // An empty prompt, so empty values look like the read-only cells.
-        TextField(text: $draft, prompt: Text("")) { Text("Value") }
-            .labelsHidden()
-            .textFieldStyle(.plain)
-            .lineLimit(1)
-            .focused($isFocused)
-            .disabled(isDisabled)
-            .help(value)
-            .onAppear { draft = value }
-            .onChange(of: value) { draft = value }
-            .onSubmit { commit() }
-            .onChange(of: isFocused) {
-                if !isFocused { commit() }
-            }
-            .onExitCommand {
-                draft = value
-                isFocused = false
-            }
-    }
-
-    private func commit() {
-        guard draft != value, !isSavingDraft else { return }
-        isSavingDraft = true
-        let text = draft
-        Task {
-            if !(await save(text)) {
-                draft = value
-            }
-            isSavingDraft = false
-        }
     }
 }
