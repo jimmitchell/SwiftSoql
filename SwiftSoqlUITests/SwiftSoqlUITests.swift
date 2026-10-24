@@ -215,4 +215,19 @@ final class SwiftSoqlUITests: XCTestCase {
         let accountDiagram = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Schema diagram of Account'")).firstMatch
         XCTAssertTrue(accountDiagram.waitForExistence(timeout: 60), "Double-clicking Account should move it to the middle")
     }
+
+    @MainActor
+    func testBrowserLoginAsksForAKeyTheFirstTime() throws {
+        try launch(connected: false)
+        app.buttons["Log In with Browser…"].click()
+        let sheet = app.sheets.firstMatch
+        XCTAssertTrue(sheet.waitForExistence(timeout: 10))
+        let key = sheet.textFields["Consumer key"]
+        XCTAssertTrue(key.exists, "With no keys saved, the sheet asks for one")
+        XCTAssertFalse(sheet.buttons["Log In"].isEnabled, "Logging in needs a key")
+        key.click()
+        key.typeText("3MVGexample")
+        XCTAssertTrue(sheet.buttons["Log In"].isEnabled)
+        sheet.buttons["Cancel"].click()
+    }
 }

@@ -165,14 +165,29 @@ struct BrowserLoginTests {
 
 @Suite(.serialized)
 struct BrowserLoginKeyTests {
-    @Test func settingsKeyIsUsedAndTrimmed() {
-        defer { AppDefaults.store.removeObject(forKey: BrowserLogin.consumerKeySetting) }
-        AppDefaults.store.removeObject(forKey: BrowserLogin.consumerKeySetting)
-        #expect(BrowserLogin.consumerKey == nil, "The shipped app has no built-in key")
-        AppDefaults.store.set("  3MVGexample \n", forKey: BrowserLogin.consumerKeySetting)
-        #expect(BrowserLogin.consumerKey == "3MVGexample")
-        AppDefaults.store.set("   ", forKey: BrowserLogin.consumerKeySetting)
-        #expect(BrowserLogin.consumerKey == nil)
+    private func clear() {
+        for key in [BrowserLogin.keysSetting, BrowserLogin.legacyKeySetting, "browserLoginKeyByHost"] {
+            AppDefaults.store.removeObject(forKey: key)
+        }
+    }
+
+    @Test func aSingleSavedKeyBecomesTheFirstInTheList() {
+        clear()
+        defer { clear() }
+        #expect(BrowserLogin.consumerKeys.isEmpty, "The shipped app has no built-in key")
+        AppDefaults.store.set("  3MVGold \n", forKey: BrowserLogin.legacyKeySetting)
+        #expect(BrowserLogin.consumerKeys.map(\.key) == ["3MVGold"])
+        #expect(AppDefaults.store.string(forKey: BrowserLogin.legacyKeySetting) == nil)
+        #expect(BrowserLogin.consumerKeys.map(\.label) == ["My org"], "Moved once, then read from the list")
+    }
+
+    @Test func keysAreTrimmedAndEmptyOnesDropped() {
+        clear()
+        defer { clear() }
+        BrowserLogin.consumerKeys = [.init(label: "Acme Prod", key: " 3MVGa "), .init(label: "Blank", key: "  "), .init(label: "Acme UAT", key: "3MVGb")]
+        #expect(BrowserLogin.consumerKeys.map(\.label) == ["Acme Prod", "Acme UAT"])
+        #expect(BrowserLogin.consumerKeys.first?.key == "3MVGa")
+        #expect(BrowserLogin.lastKey(for: "acme.my.salesforce.com") == nil, "No suggestion before a login")
     }
 
     @Test func readsLoginsSavedBeforeKeysWereRemembered() throws {

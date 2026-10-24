@@ -7,8 +7,9 @@ import Security
 ///
 /// Uses the OAuth web server flow with PKCE, so the app needs only the consumer key of a
 /// Salesforce External Client App, not a secret. A local External Client App only works for the
-/// org it was created in, so users enter their own app's key in Settings; a build can also carry
-/// one (SalesforceConsumerKey in Info.plist), for an app that's packaged for every org. Refresh
+/// org it was created in, so users keep a labeled key for each of their orgs (in Settings, or added
+/// when logging in); a build can also carry one (SalesforceConsumerKey in Info.plist), for an app
+/// that's packaged for every org. Refresh
 /// tokens are kept in the Keychain; the list of logins (username, instance, login host and the key
 /// they were made with) is kept in the app's settings.
 enum BrowserLogin {
@@ -16,15 +17,52 @@ enum BrowserLogin {
     private static let keychainService = "org.jimmitchell.SwiftSoql.browser-login"
     private static let loginsKey = "browserLogins"
 
-    /// The settings key for a consumer key entered in Settings.
-    static let consumerKeySetting = "browserLoginConsumerKey"
+    /// An External Client App's consumer key, with a label to tell the user's orgs' keys apart.
+    struct ConsumerKey: Codable, Identifiable, Hashable {
+        var id = UUID()
+        var label: String
+        var key: String
+    }
 
-    /// The consumer key to log in with: the one entered in Settings, or else one built into the app.
-    static var consumerKey: String? {
-        for key in [AppDefaults.store.string(forKey: consumerKeySetting), Bundle.main.object(forInfoDictionaryKey: "SalesforceConsumerKey") as? String] {
-            if let key = key?.trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty { return key }
+    /// Where the list of keys is saved, and where a single key was saved before there was a list.
+    static let keysSetting = "browserLoginKeys"
+    static let legacyKeySetting = "browserLoginConsumerKey"
+    private static let keyByHostSetting = "browserLoginKeyByHost"
+
+    /// The user's consumer keys, then the one built into the app if there is one.
+    static var consumerKeys: [ConsumerKey] {
+        get {
+            var keys = (AppDefaults.store.data(forKey: keysSetting)).flatMap { try? JSONDecoder().decode([ConsumerKey].self, from: $0) } ?? []
+            // A key saved before there was a list becomes its first entry.
+            if keys.isEmpty, let legacy = AppDefaults.store.string(forKey: legacyKeySetting)?.trimmingCharacters(in: .whitespacesAndNewlines), !legacy.isEmpty {
+                keys = [ConsumerKey(label: "My org", key: legacy)]
+                AppDefaults.store.set(try? JSONEncoder().encode(keys), forKey: keysSetting)
+                AppDefaults.store.removeObject(forKey: legacyKeySetting)
+            }
+            if let builtIn = (Bundle.main.object(forInfoDictionaryKey: "SalesforceConsumerKey") as? String)?.trimmingCharacters(in: .whitespaces),
+               !builtIn.isEmpty, !keys.contains(where: { $0.key == builtIn }) {
+                keys.append(ConsumerKey(label: "Built in", key: builtIn))
+            }
+            return keys
         }
-        return nil
+        set {
+            let cleaned = newValue
+                .map { ConsumerKey(id: $0.id, label: $0.label, key: $0.key.trimmingCharacters(in: .whitespacesAndNewlines)) }
+                .filter { !$0.key.isEmpty }
+            AppDefaults.store.set(try? JSONEncoder().encode(cleaned), forKey: keysSetting)
+        }
+    }
+
+    /// The key last used to log in through a login host, to suggest it next time.
+    static func lastKey(for host: String) -> ConsumerKey? {
+        let ids = AppDefaults.store.dictionary(forKey: keyByHostSetting) as? [String: String] ?? [:]
+        return consumerKeys.first { $0.id.uuidString == ids[normalizedHost(host)] }
+    }
+
+    private static func remember(_ key: ConsumerKey, for host: String) {
+        var ids = AppDefaults.store.dictionary(forKey: keyByHostSetting) as? [String: String] ?? [:]
+        ids[normalizedHost(host)] = key.id.uuidString
+        AppDefaults.store.set(ids, forKey: keyByHostSetting)
     }
 
     struct SavedLogin: Codable, Equatable {
@@ -56,9 +94,24 @@ enum BrowserLogin {
     // MARK: Logging in
 
     /// Opens Salesforce's login page for `host` (login.salesforce.com, test.salesforce.com or a
-    /// My Domain), and saves the login once the user has approved access.
-    static func logIn(host: String) async throws -> SavedLogin {
-        guard let consumerKey else { throw BrowserLoginError("Add your External Client App's consumer key in Settings first.") }
+    /// My Domain) with a consumer key from the org being logged in to, and saves the login (and
+    /// the key, if it's new) once the user has approved access.
+    static func logIn(host: String, key: ConsumerKey) async throws -> SavedLogin {
+        do {
+            let login = try await logIn(host: host, consumerKey: key.key)
+            if !consumerKeys.contains(where: { $0.key == key.key }) {
+                consumerKeys += [key]
+            }
+            if let saved = consumerKeys.first(where: { $0.key == key.key }) {
+                remember(saved, for: host)
+            }
+            return login
+        } catch let error as BrowserLoginError {
+            throw BrowserLoginError("\(error.message) If you work in several orgs, check that \"\(key.label)\" is the key from the org you're logging in to.")
+        }
+    }
+
+    private static func logIn(host: String, consumerKey: String) async throws -> SavedLogin {
         let host = normalizedHost(host)
 
         let verifier = randomURLSafeString(bytes: 48)
@@ -105,7 +158,7 @@ enum BrowserLogin {
         guard let login = savedLogins.first(where: { $0.username == username }) else {
             throw BrowserLoginError("There's no saved browser login for \(username).")
         }
-        guard let consumerKey = login.consumerKey ?? consumerKey else {
+        guard let consumerKey = login.consumerKey ?? consumerKeys.first?.key else {
             throw BrowserLoginError("Add your External Client App's consumer key in Settings, then log in again.")
         }
         guard let refreshToken = refreshToken(for: username) else {

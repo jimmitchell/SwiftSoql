@@ -178,12 +178,18 @@ struct LoginView: View {
     }
 }
 
-/// Asks which Salesforce login page to use, then logs in there in the browser.
+/// Asks which Salesforce login page and which org's consumer key to use, then logs in there in
+/// the browser. A new key can be entered here and is remembered for next time.
 private struct BrowserLoginSheet: View {
     let onLogin: (BrowserLogin.SavedLogin) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var kind = "production"
     @State private var domain = ""
+    @State private var keys = BrowserLogin.consumerKeys
+    /// The chosen key's id, or nil to enter a new one.
+    @State private var keyID: UUID?
+    @State private var newLabel = ""
+    @State private var newKey = ""
     @State private var isWorking = false
     @State private var errorMessage: String?
 
@@ -195,37 +201,15 @@ private struct BrowserLoginSheet: View {
         }
     }
 
+    private var chosenKey: BrowserLogin.ConsumerKey? {
+        if let keyID { return keys.first { $0.id == keyID } }
+        let key = newKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { return nil }
+        let label = newLabel.trimmingCharacters(in: .whitespaces)
+        return BrowserLogin.ConsumerKey(label: label.isEmpty ? host : label, key: key)
+    }
+
     var body: some View {
-        if BrowserLogin.consumerKey == nil {
-            needsKey
-        } else {
-            form
-        }
-    }
-
-    /// Browser login needs the consumer key of an External Client App in the user's org.
-    private var needsKey: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Log In with Browser").font(.headline)
-            Text("To log in without the Salesforce CLI, SwiftSoql needs the consumer key of an External Client App in your org. An admin creates one in Setup, then you add its key in SwiftSoql's Settings.")
-                .fixedSize(horizontal: false, vertical: true)
-            Link("How to create the External Client App", destination: URL(string: "https://github.com/jimmitchell/SwiftSoql#logging-in-with-the-browser")!)
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                SettingsLink {
-                    Text("Open Settings…")
-                }
-                .keyboardShortcut(.defaultAction)
-                .simultaneousGesture(TapGesture().onEnded { dismiss() })
-            }
-        }
-        .padding(20)
-        .frame(width: 420)
-    }
-
-    private var form: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Log In with Browser").font(.headline)
             Picker("Log in to", selection: $kind) {
@@ -238,38 +222,70 @@ private struct BrowserLoginSheet: View {
                 TextField("mycompany.my.salesforce.com", text: $domain)
                     .textFieldStyle(.roundedBorder)
             }
-            Text("Salesforce's login page opens in a browser window. SwiftSoql keeps the login in your Keychain.")
+
+            Divider()
+            if !keys.isEmpty {
+                Picker("Consumer key", selection: $keyID) {
+                    ForEach(keys) { key in
+                        Text(key.label).tag(Optional(key.id))
+                    }
+                    Divider()
+                    Text("New Key…").tag(UUID?.none)
+                }
+            }
+            if keyID == nil {
+                TextField("Label, such as the org's name", text: $newLabel)
+                    .textFieldStyle(.roundedBorder)
+                TextField("Consumer key", text: $newKey)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                Link("How to create the External Client App and find its key",
+                     destination: URL(string: "https://github.com/jimmitchell/SwiftSoql#logging-in-with-the-browser")!)
+                    .font(.callout)
+            }
+            Text("Use the key of the External Client App in the org you're logging in to. Salesforce's login page opens in a browser window, and SwiftSoql keeps the login in your Keychain.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if let errorMessage {
                 Text(errorMessage).foregroundStyle(.red).font(.callout).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             HStack {
                 if isWorking { ProgressView().controlSize(.small) }
                 Spacer()
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                Button("Log In") {
-                    isWorking = true
-                    errorMessage = nil
-                    Task {
-                        defer { isWorking = false }
-                        do {
-                            let login = try await BrowserLogin.logIn(host: host)
-                            dismiss()
-                            onLogin(login)
-                        } catch is CancellationError {
-                        } catch {
-                            errorMessage = error.localizedDescription
-                        }
-                    }
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(isWorking || (kind == "domain" && host.isEmpty))
+                Button("Log In") { logIn() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(isWorking || chosenKey == nil || (kind == "domain" && host.isEmpty))
             }
         }
         .padding(20)
-        .frame(width: 420)
+        .frame(width: 440)
+        .onAppear(perform: suggestKey)
+        .onChange(of: host) { suggestKey() }
+    }
+
+    /// Picks the key last used with this login page, or else the first one.
+    private func suggestKey() {
+        keyID = (BrowserLogin.lastKey(for: host) ?? keys.first)?.id
+    }
+
+    private func logIn() {
+        guard let key = chosenKey else { return }
+        isWorking = true
+        errorMessage = nil
+        Task {
+            defer { isWorking = false }
+            do {
+                let login = try await BrowserLogin.logIn(host: host, key: key)
+                dismiss()
+                onLogin(login)
+            } catch is CancellationError {
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
     }
 }

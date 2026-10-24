@@ -173,7 +173,7 @@ struct SettingsView: View {
     @AppStorage("skipCompoundFieldsInGeneratedQueries") private var skipCompoundFields = false
     @AppStorage("maxRecentQueries") private var maxRecentQueries = 25
     @AppStorage("describeAllInBackground") private var describeAllInBackground = true
-    @AppStorage(BrowserLogin.consumerKeySetting) private var consumerKey = ""
+    @State private var consumerKeys = BrowserLogin.consumerKeys
 
     var body: some View {
         Form {
@@ -189,14 +189,36 @@ struct SettingsView: View {
                 Toggle("Use address parts instead of compound address fields", isOn: $skipCompoundFields)
             }
             Section("Browser Login") {
-                TextField("Consumer key", text: $consumerKey, prompt: Text("From your org's External Client App"))
-                    .font(.system(.body, design: .monospaced))
-                Text("Logging in with the browser needs an External Client App in your org, with the callback URL swiftsoql://oauth/callback. The Salesforce CLI's orgs work without it.")
+                Text("Logging in with the browser needs an External Client App in each org, with the callback URL swiftsoql://oauth/callback. Keep a key for each org you work in; keys added when logging in appear here too. The Salesforce CLI's orgs work without any of this.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Link("How to create the External Client App", destination: URL(string: "https://github.com/jimmitchell/SwiftSoql#logging-in-with-the-browser")!)
-                    .font(.caption)
+                ForEach($consumerKeys) { $key in
+                    HStack {
+                        TextField("Label", text: $key.label)
+                            .frame(width: 130)
+                        TextField("Consumer key", text: $key.key)
+                            .font(.system(.body, design: .monospaced))
+                        Button {
+                            consumerKeys.removeAll { $0.id == key.id }
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Remove this key")
+                        .accessibilityLabel("Remove \(key.label)")
+                    }
+                    .labelsHidden()
+                }
+                HStack {
+                    Button("Add Key") {
+                        consumerKeys.append(BrowserLogin.ConsumerKey(label: "", key: ""))
+                    }
+                    Spacer()
+                    Link("How to create the External Client App", destination: URL(string: "https://github.com/jimmitchell/SwiftSoql#logging-in-with-the-browser")!)
+                        .font(.caption)
+                }
             }
+            .onChange(of: consumerKeys) { BrowserLogin.consumerKeys = consumerKeys }
             Section("Schema") {
                 Toggle("Describe every SObject after connecting", isOn: $describeAllInBackground)
                 Text("Lets the sidebar filter find fields in every SObject, at the cost of about one API request per 25 SObjects. Takes effect the next time you connect.")

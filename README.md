@@ -48,11 +48,19 @@ permission to customize the org (an admin can do it for you).
    allowed to use it (for example, **Permitted Users: All users may self-authorize**).
 5. On the **Settings** tab, open **OAuth Settings → Consumer Key and Secret** and copy the
    **Consumer Key**.
-6. In SwiftSoql, open **Settings → Browser Login** and paste the key. Then choose **Log In with
-   Browser…** on the connect screen and pick Production, Sandbox or your My Domain.
+6. In SwiftSoql, choose **Log In with Browser…** on the connect screen, pick Production, Sandbox
+   or your My Domain, and paste the key with a label for the org. (You can also add keys in
+   **Settings → Browser Login**.)
 
 A new app can take a few minutes before Salesforce accepts logins with it. The key isn't a
 secret: with PKCE, it only identifies the app.
+
+**Working in several orgs?** Each org needs its own External Client App and key. Add each key with
+a label (such as the org's name) in **Settings → Browser Login**, or enter it in the login window
+the first time you log in to that org. The login window suggests the key you last used with each
+login page, and every saved login keeps the key it was made with, so reconnecting always uses the
+right one. (Packaging the External Client App in a managed package and installing it in each org
+lets one key work everywhere, but needs a Dev Hub.)
 
 ## Building
 
