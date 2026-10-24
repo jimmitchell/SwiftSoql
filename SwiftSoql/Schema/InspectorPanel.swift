@@ -36,8 +36,8 @@ struct InspectorPanel: View {
     }
 }
 
-/// Pinned queries, then the queries run recently in this org, newest first. Click one to put it
-/// in the editor; double-click to run it. Pinned queries can be dragged into order.
+/// Pinned queries, marked with a pin, then the queries run recently in this org, newest first.
+/// Click one to put it in the editor; double-click to run it. Pinned queries can be dragged into order.
 struct RecentQueriesList: View {
     let model: ExplorerModel
 
@@ -45,20 +45,12 @@ struct RecentQueriesList: View {
 
     var body: some View {
         List(selection: $selection) {
-            if !model.pinnedQueries.isEmpty {
-                Section("Pinned") {
-                    ForEach(model.pinnedQueries, id: \.self) { query in
-                        row(query, isPinned: true)
-                    }
-                    .onMove { model.movePinnedQueries(fromOffsets: $0, toOffset: $1) }
-                }
+            ForEach(model.pinnedQueries, id: \.self) { query in
+                row(query, isPinned: true)
             }
-            if !model.recentQueries.isEmpty {
-                Section("Recent") {
-                    ForEach(model.recentQueries, id: \.self) { query in
-                        row(query, isPinned: false)
-                    }
-                }
+            .onMove { model.movePinnedQueries(fromOffsets: $0, toOffset: $1) }
+            ForEach(model.recentQueries, id: \.self) { query in
+                row(query, isPinned: false)
             }
         }
         .contextMenu(forSelectionType: String.self) { queries in
@@ -99,11 +91,20 @@ struct RecentQueriesList: View {
     }
 
     private func row(_ query: String, isPinned: Bool) -> some View {
-        Text(query)
-            .font(.system(size: 11, design: .monospaced))
-            .lineLimit(4)
-            .padding(.vertical, 2)
-            .help(query)
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            // Recent queries keep the pin's space, so all the queries line up.
+            Image(systemName: "pin.fill")
+                .font(.system(size: 9))
+                .foregroundStyle(.orange)
+                .opacity(isPinned ? 1 : 0)
+                .accessibilityLabel(isPinned ? "Pinned" : "")
+                .accessibilityHidden(!isPinned)
+            Text(query)
+                .font(.system(size: 11, design: .monospaced))
+                .lineLimit(4)
+        }
+        .padding(.vertical, 2)
+        .help(query)
             .swipeActions(edge: .trailing) {
                 if isPinned {
                     Button("Unpin", systemImage: "pin.slash") { model.unpinQueries([query]) }
