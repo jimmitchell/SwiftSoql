@@ -25,10 +25,13 @@ struct InspectorPanel: View {
             .labelsHidden()
             .padding(8)
             Divider()
-            switch tab {
-            case .details: DetailsInspector(model: model)
-            case .recent: RecentQueriesList(model: model)
+            Group {
+                switch tab {
+                case .details: DetailsInspector(model: model)
+                case .recent: RecentQueriesList(model: model)
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }
