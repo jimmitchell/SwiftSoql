@@ -10,8 +10,41 @@ final class ApexModel {
     private(set) var isRunning = false
     /// Shows only the log lines that contain this text.
     var logFilter = ""
-    /// Shows only System.debug output.
-    var showDebugOnly = false
+    /// Which kind of log lines to show.
+    var logLines = LogLines.all
+    /// A line of the code to move to, set when a line reference in the log is clicked.
+    private(set) var revealLine: LineRequest?
+
+    /// The kinds of debug log lines the log can be narrowed to.
+    enum LogLines: String, CaseIterable, Identifiable {
+        case all = "All"
+        case debug = "Debug"
+        case soql = "SOQL"
+        case dml = "DML"
+        case exceptions = "Exceptions"
+
+        var id: String { rawValue }
+
+        func includes(_ line: Substring) -> Bool {
+            switch self {
+            case .all: true
+            case .debug: line.contains("|USER_DEBUG|")
+            case .soql: line.contains("|SOQL_EXECUTE_")
+            case .dml: line.contains("|DML_")
+            case .exceptions: line.contains("|EXCEPTION_THROWN|") || line.contains("|FATAL_ERROR|")
+            }
+        }
+    }
+
+    /// A request to move the editor to a line; the id makes repeated clicks on one line count.
+    struct LineRequest: Equatable {
+        let line: Int
+        let id = UUID()
+    }
+
+    func reveal(line: Int) {
+        revealLine = LineRequest(line: line)
+    }
 
     var logLevels: [ApexLogCategory: ApexLogLevel] {
         didSet {
@@ -64,10 +97,10 @@ final class ApexModel {
     var displayedLog: String {
         guard let log = selectedRun?.debugLog else { return "" }
         let filter = logFilter.trimmingCharacters(in: .whitespaces)
-        guard showDebugOnly || !filter.isEmpty else { return log }
+        guard logLines != .all || !filter.isEmpty else { return log }
         return log.split(separator: "\n", omittingEmptySubsequences: false)
             .filter { line in
-                (!showDebugOnly || line.contains("|USER_DEBUG|"))
+                logLines.includes(line)
                     && (filter.isEmpty || line.localizedCaseInsensitiveContains(filter))
             }
             .joined(separator: "\n")

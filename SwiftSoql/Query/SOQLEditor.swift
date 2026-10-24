@@ -121,9 +121,9 @@ struct SOQLEditor: NSViewRepresentable {
             let selection = textView.selectedRanges
             storage.beginEditing()
             removeAttributes(storage)
-            apply(tokens, to: storage,
-                  uppercaseKeywords: defaults.bool(forKey: "soqlUppercaseKeywords"),
-                  addCompletions: defaults.bool(forKey: "soqlPopupCompletions"))
+            SOQLHighlighter.apply(tokens, to: storage, offset: 0,
+                                  uppercaseKeywords: defaults.bool(forKey: "soqlUppercaseKeywords"),
+                                  addCompletions: defaults.bool(forKey: "soqlPopupCompletions") ? { self.completions.add($0, at: $1) } : nil)
             storage.endEditing()
             textView.selectedRanges = selection
             coloredLastTime = true
@@ -140,38 +140,5 @@ struct SOQLEditor: NSViewRepresentable {
             completions.clear()
         }
 
-        private func apply(_ tokens: Tokens, to storage: NSTextStorage, uppercaseKeywords: Bool, addCompletions: Bool) {
-            for t in tokens.tokens where NSMaxRange(t.loc) <= storage.length {
-                if addCompletions && !t.completions.isEmpty {
-                    completions.add(t.completions, at: t.loc)
-                }
-                switch t.type {
-                case .error:
-                    storage.addAttributes([
-                        .underlineStyle: NSUnderlineStyle.single.rawValue,
-                        .underlineColor: SOQLStyle.error,
-                    ], range: t.loc)
-                    if let message = t.errorMessage {
-                        storage.addAttributes([.toolTip: message, .cursor: NSCursor.pointingHand], range: t.loc)
-                    }
-                case .keyword, .operator:
-                    let upper = t.tokenTxt.uppercased()
-                    if uppercaseKeywords, upper != t.tokenTxt, upper.utf16.count == t.loc.length {
-                        storage.replaceCharacters(in: t.loc, with: upper)
-                    }
-                    storage.addAttribute(.foregroundColor, value: SOQLStyle.keyword, range: t.loc)
-                default:
-                    if let color = SOQLStyle.color(for: t.type) {
-                        storage.addAttribute(.foregroundColor, value: color, range: t.loc)
-                    }
-                }
-                // Only these token types color their children; e.g. FIELDS(STANDARD) turns a field path
-                // into a keyword, and its unresolved field shouldn't show as an error.
-                let containers: TokenType = [.fieldPath, .sobject, .function, .typeOf, .childSelect, .semiJoinSelect]
-                if containers.contains(t.type), let children = t.value.tokens {
-                    apply(children, to: storage, uppercaseKeywords: uppercaseKeywords, addCompletions: addCompletions)
-                }
-            }
-        }
     }
 }

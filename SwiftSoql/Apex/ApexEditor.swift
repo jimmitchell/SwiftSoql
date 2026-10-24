@@ -1,17 +1,35 @@
 import AppKit
 import SwiftUI
 
-/// The anonymous Apex editor, with simple syntax coloring and a marker on the line that failed.
+/// The anonymous Apex editor: syntax coloring, a marker on the line that failed, inline SOQL
+/// checked like the query editor, and completions of SObject and field names.
 struct ApexEditor: NSViewRepresentable {
     @Binding var text: String
     /// The failed run to mark, if any.
     var error: ApexExecution?
+    /// Supplies describes for inline SOQL and completions.
+    var model: ExplorerModel
+    /// Changes when new describes are available, so inline SOQL is checked again.
+    var schemaGeneration = 0
+    /// A line to move to, e.g. one clicked in the debug log.
+    var revealLine: ApexModel.LineRequest?
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = NSTextView.scrollableTextView()
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
         scrollView.borderType = .noBorder
-        let textView = scrollView.documentView as! NSTextView
+        let textView = SOQLTextView(usingTextLayoutManager: false)
+        textView.autoresizingMask = [.width]
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.textContainer?.widthTracksTextView = true
+        scrollView.documentView = textView
         textView.configureForCode()
+        textView.completionsProvider = { [weak coordinator = context.coordinator, weak textView] range in
+            guard let coordinator, let textView else { return [] }
+            return coordinator.completions(for: range, in: textView.string as NSString)
+        }
         textView.setAccessibilityIdentifier("apexEditor")
         textView.setAccessibilityLabel("Anonymous Apex")
         textView.delegate = context.coordinator
@@ -31,11 +49,16 @@ struct ApexEditor: NSViewRepresentable {
                 textView.replaceCharacters(in: fullRange, with: text)
                 textView.didChangeText()
             }
-        } else if coordinator.markedError?.id != error?.id {
+        } else if coordinator.markedError?.id != error?.id || coordinator.colorizedGeneration != schemaGeneration {
+            let errorChanged = coordinator.markedError?.id != error?.id
             coordinator.colorize(textView)
-            if let error {
+            if errorChanged, let error {
                 coordinator.reveal(error, in: textView)
             }
+        }
+        if let revealLine, coordinator.revealedLine != revealLine.id {
+            coordinator.revealedLine = revealLine.id
+            coordinator.reveal(line: revealLine.line, in: textView)
         }
     }
 
@@ -46,6 +69,13 @@ struct ApexEditor: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: ApexEditor
         fileprivate var markedError: ApexExecution?
+        fileprivate var colorizedGeneration = -1
+        fileprivate var revealedLine: UUID?
+        private let analyzer = SoqlAnalyzer()
+        /// Completions for the inline SOQL, by position in the code.
+        private var queryCompletions = CompletionLocations()
+        /// The inline queries' ranges, from the last time the code was checked.
+        private var queryRanges: [NSRange] = []
 
         init(parent: ApexEditor) {
             self.parent = parent
@@ -83,6 +113,7 @@ struct ApexEditor: NSViewRepresentable {
                     storage.addAttribute(.foregroundColor, value: color, range: range)
                 }
             }
+            colorInlineQueries(storage)
             markedError = parent.error
             if let error = parent.error, let range = Self.errorRange(error, in: storage.string as NSString) {
                 storage.addAttributes([
@@ -92,6 +123,77 @@ struct ApexEditor: NSViewRepresentable {
                 ], range: range)
             }
             storage.endEditing()
+        }
+
+        /// Checks and colors each `[SELECT …]` in the code as the query editor would, with its bind
+        /// variables masked so they aren't reported as errors.
+        private func colorInlineQueries(_ storage: NSTextStorage) {
+            colorizedGeneration = parent.schemaGeneration
+            queryCompletions.clear()
+            queryRanges = ApexSource.inlineQueries(in: storage.string as NSString)
+            analyzer.describer = parent.model
+            for range in queryRanges {
+                let query = (storage.string as NSString).substring(with: range)
+                let masked = ApexSource.maskingBinds(in: query)
+                storage.addAttribute(.foregroundColor, value: NSColor.textColor, range: range)
+                let binds = masked.binds.map { NSRange(location: $0.location + range.location, length: $0.length) }
+                SOQLHighlighter.apply(analyzer.parseAndResolve(masked.query), to: storage, offset: range.location,
+                                      uppercaseKeywords: false, ignoringErrorsIn: binds) { completions, loc in
+                    self.queryCompletions.add(completions, at: loc)
+                }
+                // The binds were checked as placeholders; show them as plain Apex.
+                for bind in binds {
+                    storage.addAttribute(.foregroundColor, value: NSColor.textColor, range: bind)
+                }
+            }
+        }
+
+        /// SOQL completions inside an inline query; elsewhere, an SObject's fields after `name.`
+        /// or inside `new Name(…)`, and SObject names for a word that starts like one.
+        func completions(for range: NSRange, in text: NSString) -> [Completion] {
+            if queryRanges.contains(where: { NSLocationInRange(range.location, $0) || NSMaxRange($0) == range.location }) {
+                return queryCompletions.completions(in: range)
+            }
+            let model = parent.model
+            func sobjectNamed(_ name: String) -> String? {
+                model.sobjects.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }?.name
+            }
+            func fields(of sobject: String) -> [Completion] {
+                guard let describe = model.cachedDescribe(sobject) else {
+                    // Fetch it for next time; the popup shows once it's described.
+                    _ = model.schemaObject(sobject)
+                    return []
+                }
+                return describe.fields.map { Completion($0.name, type: .field) }
+            }
+            switch ApexSource.completionContext(in: text, wordRange: range) {
+            case .afterDot(let name):
+                let variables = ApexSource.sobjectVariables(in: text as String, sobjectNamed: sobjectNamed)
+                guard let sobject = sobjectNamed(name) ?? variables[name.lowercased()] else { return [] }
+                return fields(of: sobject)
+            case .newObject(let name):
+                return sobjectNamed(name).map(fields) ?? []
+            case .word:
+                let typed = text.substring(with: range)
+                guard typed.count >= 2 else { return [] }
+                return model.sobjects.filter { $0.name.lowercased().hasPrefix(typed.lowercased()) }
+                    .map { Completion($0.name, type: .sobject) }
+            }
+        }
+
+        /// Selects a line (counting from 1) and scrolls to it.
+        func reveal(line: Int, in textView: NSTextView) {
+            let text = textView.string as NSString
+            var start = 0
+            for _ in 1..<max(line, 1) {
+                let newline = text.range(of: "\n", range: NSRange(location: start, length: text.length - start))
+                guard newline.location != NSNotFound else { return }
+                start = NSMaxRange(newline)
+            }
+            let lineRange = text.lineRange(for: NSRange(location: start, length: 0))
+            textView.window?.makeFirstResponder(textView)
+            textView.setSelectedRange(lineRange)
+            textView.scrollRangeToVisible(lineRange)
         }
 
         /// Puts the insertion point where the error is.

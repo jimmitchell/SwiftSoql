@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Runs anonymous Apex: the code above, and below it the runs so far beside the selected run's debug log.
 struct ApexWorkspace: View {
@@ -13,7 +14,7 @@ struct ApexWorkspace: View {
 
     var body: some View {
         VSplitView {
-            ApexEditor(text: $apex.code, error: apex.currentError)
+            ApexEditor(text: $apex.code, error: apex.currentError, model: model, schemaGeneration: model.schemaGeneration, revealLine: apex.revealLine)
                 .frame(minHeight: 80, idealHeight: 220)
 
             // An HSplitView here loops forever laying out the runs table, so the list has a fixed width.
@@ -125,8 +126,13 @@ struct ApexWorkspace: View {
     private var logPane: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                Toggle("Debug Output Only", isOn: $apex.showDebugOnly)
-                    .help("Show only System.debug lines")
+                Picker("Show", selection: $apex.logLines) {
+                    ForEach(ApexModel.LogLines.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .help("Show all log lines, or only System.debug output, queries, DML or exceptions")
                 TextField("Filter", text: $apex.logFilter)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 220)
@@ -135,6 +141,9 @@ struct ApexWorkspace: View {
                     Text(ByteCountFormatter.string(fromByteCount: Int64(run.debugLog.utf8.count), countStyle: .file))
                         .foregroundStyle(.secondary)
                 }
+                Button("Save Log…") { saveLog() }
+                    .disabled(apex.selectedRun?.debugLog.isEmpty ?? true)
+                    .help("Save the whole debug log to a file")
             }
             .font(.callout)
             .controlSize(.small)
@@ -145,7 +154,7 @@ struct ApexWorkspace: View {
                 failureBanner(run)
                 Divider()
             }
-            LogTextView(text: apex.displayedLog)
+            LogTextView(text: apex.displayedLog) { apex.reveal(line: $0) }
                 .accessibilityIdentifier("debugLog")
                 .overlay {
                     if let run = apex.selectedRun, run.debugLog.isEmpty {
@@ -166,6 +175,21 @@ struct ApexWorkspace: View {
         .background(Color.red.opacity(0.08))
     }
 
+    private func saveLog() {
+        guard let run = apex.selectedRun else { return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.log]
+        panel.nameFieldStringValue = "Apex Debug Log.log"
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                try run.debugLog.write(to: url, atomically: true, encoding: .utf8)
+            } catch {
+                model.error = DisplayedError("Unable to save the log", error)
+            }
+        }
+    }
+
     private func summary(_ run: ApexExecution) -> String {
         guard !run.success, run.line > 0 else { return run.resultText }
         return "Line \(run.line): \(run.resultText)"
@@ -184,9 +208,11 @@ struct ApexWorkspace: View {
     }
 }
 
-/// A read-only text view for debug logs, which can run to megabytes.
+/// A read-only text view for debug logs, which can run to megabytes. Line references such as
+/// `|[4]|` are links that move the editor to that line of the code.
 struct LogTextView: NSViewRepresentable {
     let text: String
+    var onLine: (Int) -> Void = { _ in }
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSTextView.scrollableTextView()
@@ -194,24 +220,58 @@ struct LogTextView: NSViewRepresentable {
         let textView = scrollView.documentView as! NSTextView
         textView.isEditable = false
         textView.isSelectable = true
-        textView.isRichText = false
         textView.usesFindBar = true
         textView.isIncrementalSearchingEnabled = true
-        textView.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
         textView.textContainerInset = NSSize(width: 4, height: 6)
+        textView.delegate = context.coordinator
+        textView.setAccessibilityIdentifier("debugLogText")
         // Long log lines scroll sideways rather than wrapping.
         scrollView.hasHorizontalScroller = true
         textView.isHorizontallyResizable = true
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.textContainer?.widthTracksTextView = false
         textView.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        textView.string = text
+        context.coordinator.show(text, in: textView)
         return scrollView
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
-        guard let textView = scrollView.documentView as? NSTextView, textView.string != text else { return }
-        textView.string = text
+        context.coordinator.onLine = onLine
+        guard let textView = scrollView.documentView as? NSTextView, context.coordinator.shown != text else { return }
+        context.coordinator.show(text, in: textView)
         textView.scrollToBeginningOfDocument(nil)
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onLine: onLine)
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var onLine: (Int) -> Void
+        fileprivate var shown = ""
+        private static let lineReference = try! NSRegularExpression(pattern: #"\|\[(\d+)\]\|"#)
+
+        init(onLine: @escaping (Int) -> Void) {
+            self.onLine = onLine
+        }
+
+        func show(_ text: String, in textView: NSTextView) {
+            shown = text
+            let styled = NSMutableAttributedString(string: text, attributes: [
+                .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
+                .foregroundColor: NSColor.textColor,
+            ])
+            for match in Self.lineReference.matches(in: text, range: NSRange(location: 0, length: styled.length)) {
+                let number = match.range(at: 1)
+                styled.addAttribute(.link, value: "apexline:\((text as NSString).substring(with: number))", range: number)
+            }
+            textView.textStorage?.setAttributedString(styled)
+        }
+
+        func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
+            guard let link = link as? String, link.hasPrefix("apexline:"), let line = Int(link.dropFirst("apexline:".count)) else { return false }
+            onLine(line)
+            return true
+        }
     }
 }
