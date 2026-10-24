@@ -89,15 +89,22 @@ struct LoginView: View {
         }
     }
 
-    /// `-connect <alias or username>` on the command line connects the first window straight away.
+    /// `-connect <alias or username>` on the command line connects the first window straight away,
+    /// and `-query <soql>` then runs a query.
     private static var launchArgumentHandled = false
 
     private func connectFromLaunchArgument() {
-        guard !Self.launchArgumentHandled, let target = UserDefaults.standard.string(forKey: "connect") else { return }
+        let defaults = UserDefaults.standard
+        guard !Self.launchArgumentHandled, let target = defaults.string(forKey: "connect") else { return }
         Self.launchArgumentHandled = true
-        if let org = orgs.first(where: { $0.alias == target || $0.username == target }) {
-            selection = org.id
-            connect(org.id)
+        guard let org = orgs.first(where: { $0.alias == target || $0.username == target }) else { return }
+        selection = org.id
+        Task {
+            await model.connect(to: org)
+            if model.isConnected, let query = defaults.string(forKey: "query") {
+                model.soql = query
+                await model.runQuery()
+            }
         }
     }
 

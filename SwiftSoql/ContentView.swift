@@ -24,20 +24,18 @@ struct ContentView: View {
 /// The connected explorer: schema sidebar, workspace, and details inspector.
 struct ExplorerView: View {
     @Bindable var model: ExplorerModel
-    @State private var showInspector = true
+    @AppStorage("showDetailsInspector") private var showInspector = true
 
     var body: some View {
         NavigationSplitView {
-            SchemaSidebar(model: model)
-                .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 500)
-        } detail: {
-            VStack(spacing: 0) {
-                ContentUnavailableView("Query editor coming in step 3", systemImage: "text.cursor")
-                    .frame(maxHeight: .infinity)
-                Divider()
-                StatusBar(model: model)
+            SchemaSidebar(model: model) { item in
+                Task { await model.buildQuery(for: item) }
             }
+            .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 500)
+        } detail: {
+            QueryWorkspace(model: model)
         }
+        .focusedSceneValue(\.explorerModel, model)
         .inspector(isPresented: $showInspector) {
             DetailsInspector(model: model)
                 .inspectorColumnWidth(min: 240, ideal: 300, max: 500)
@@ -60,27 +58,6 @@ struct ExplorerView: View {
                 .help("Show or hide details")
             }
         }
-    }
-}
-
-struct StatusBar: View {
-    let model: ExplorerModel
-
-    var body: some View {
-        HStack {
-            Text(model.statusText)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer()
-            if let usage = model.apiUsage {
-                Text("API requests: \(usage)")
-                    .help("Daily API requests used / limit")
-            }
-        }
-        .font(.callout)
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
     }
 }
 

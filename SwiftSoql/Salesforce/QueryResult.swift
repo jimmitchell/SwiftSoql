@@ -45,7 +45,7 @@ nonisolated extension JSONObject {
     var fieldNames: [String] { keys.filter { $0 != "attributes" } }
 
     /// Follows a dotted path such as `Account.Owner.Name` or `BillingAddress.city`.
-    func value(atPath path: some Collection<Substring>) -> JSONValue? {
+    func value<Key: StringProtocol>(atPath path: some Sequence<Key>) -> JSONValue? {
         var current: JSONValue = .object(self)
         for key in path {
             guard let next = current[String(key)] else { return nil }
