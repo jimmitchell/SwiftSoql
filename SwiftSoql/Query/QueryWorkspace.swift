@@ -10,8 +10,14 @@ struct QueryWorkspace: View {
 
     var body: some View {
         VSplitView {
-            SOQLEditor(text: $model.soql, describer: model, schemaGeneration: model.schemaGeneration)
-                .frame(minHeight: 60, idealHeight: 140)
+            VStack(spacing: 0) {
+                QueryTabBar(model: model)
+                Divider()
+                SOQLEditor(text: $model.soql, describer: model, schemaGeneration: model.schemaGeneration)
+                    // Each tab gets its own editor, so undo stays within the tab.
+                    .id(model.selectedTabID)
+            }
+            .frame(minHeight: 90, idealHeight: 170)
 
             VStack(spacing: 0) {
                 resultsHeader
@@ -92,7 +98,7 @@ struct QueryWorkspace: View {
             if model.isQuerying {
                 ProgressView().controlSize(.small)
             }
-            Text(model.statusText)
+            Text(model.currentTab.statusText)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .foregroundStyle(.secondary)

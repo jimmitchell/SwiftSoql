@@ -55,16 +55,33 @@ final class ExplorerModel {
     private(set) var backgroundDescribeProgress: (done: Int, total: Int)?
     @ObservationIgnored private var backgroundDescribes: Task<Void, Never>?
 
-    // Query
-    var soql = UserDefaults.standard.string(forKey: "soql") ?? "SELECT Id, Name FROM Account"
-    private(set) var isQuerying = false
+    // Query tabs
+    private(set) var tabs: [QueryTab]
+    var selectedTabID: QueryTab.ID
+
+    /// The tab showing in the query workspace.
+    var currentTab: QueryTab { tabs.first { $0.id == selectedTabID } ?? tabs[0] }
+
+    // The current tab's query and results.
+    var soql: String {
+        get { currentTab.soql }
+        set { currentTab.soql = newValue }
+    }
+    var results: ResultSet? {
+        get { currentTab.results }
+        set { currentTab.results = newValue }
+    }
+    /// A subquery result opened from a cell of `results`.
+    var childResults: ResultSet? {
+        get { currentTab.childResults }
+        set { currentTab.childResults = newValue }
+    }
+    var isQuerying: Bool { currentTab.isQuerying }
+
     /// True while an edit or delete is being saved.
     private(set) var isSaving = false
     /// Set to ask the user to confirm deleting the checked rows.
     var isConfirmingDelete = false
-    var results: ResultSet?
-    /// A subquery result opened from a cell of `results`.
-    var childResults: ResultSet?
     /// Queries run in this org, newest first. Pinned queries aren't included.
     private(set) var recentQueries: [String] = []
     /// Queries pinned in this org, which are kept however many queries are run.
@@ -90,6 +107,15 @@ final class ExplorerModel {
     let apex = ApexModel()
 
     var isConnected: Bool { client != nil }
+
+    init() {
+        let defaults = UserDefaults.standard
+        let saved = defaults.stringArray(forKey: "queryTabs") ?? [defaults.string(forKey: "soql") ?? "SELECT Id, Name FROM Account"]
+        let restored = (saved.isEmpty ? [""] : saved).map { QueryTab(soql: $0) }
+        let selected = min(max(0, defaults.integer(forKey: "selectedQueryTab")), restored.count - 1)
+        tabs = restored
+        selectedTabID = restored[selected].id
+    }
 
     /// Whether the Run command can run what the current workspace shows.
     var canRun: Bool {
@@ -142,6 +168,7 @@ final class ExplorerModel {
             sobjectNames = Set(sobjects.map { $0.name.lowercased() })
             sobjectsByKeyPrefix = Dictionary(sobjects.compactMap { s in s.keyPrefix.map { ($0, s.name) } }, uniquingKeysWith: { a, _ in a })
             statusText = "Connected, \(sobjects.count) SObject types"
+            currentTab.statusText = statusText
             recentQueries = UserDefaults.standard.stringArray(forKey: recentQueriesKey) ?? []
             pinnedQueries = UserDefaults.standard.stringArray(forKey: pinnedQueriesKey) ?? []
             startBackgroundDescribes()
@@ -164,8 +191,11 @@ final class ExplorerModel {
         describesInFlight = [:]
         schemaSelection = nil
         expandedSObjects = []
-        results = nil
-        childResults = nil
+        for tab in tabs {
+            tab.results = nil
+            tab.childResults = nil
+            tab.statusText = ""
+        }
         pickedFields = nil
         recentQueries = []
         pinnedQueries = []
@@ -298,34 +328,80 @@ final class ExplorerModel {
 
     /// Runs the query in the editor. `includeDeleted` uses queryAll, which also returns deleted and archived rows.
     func runQuery(includeDeleted: Bool = false) async {
-        let text = soql.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let client, !text.isEmpty, !isQuerying else { return }
-        isQuerying = true
-        defer { isQuerying = false }
-        UserDefaults.standard.set(soql, forKey: "soql")
-        statusText = "Running query…"
+        // The results go to the tab the query was run in, even if another is showing by then.
+        let tab = currentTab
+        let text = tab.soql.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let client, !text.isEmpty, !tab.isQuerying else { return }
+        tab.isQuerying = true
+        defer { tab.isQuerying = false }
+        saveTabs()
+        tab.statusText = "Running query…"
         let started = ContinuousClock.now
         do {
             let result = try await client.query(text, includeDeleted: includeDeleted)
             let time = Self.elapsed(since: started)
             addRecentQuery(text)
-            childResults = nil
+            tab.childResults = nil
             if result.records.isEmpty {
-                results = nil
-                statusText = result.totalSize > 0
+                tab.results = nil
+                tab.statusText = result.totalSize > 0
                     ? "Count query result is \(result.totalSize) rows \(time)"
                     : "Query returned 0 rows \(time)"
             } else {
-                results = ResultSet(result: result)
-                results?.includesDeleted = includeDeleted
-                statusText = rowsLoadedStatus(time: time)
-                describeResultTypes()
+                tab.results = ResultSet(result: result)
+                tab.results?.includesDeleted = includeDeleted
+                tab.statusText = rowsLoadedStatus(tab, time: time)
+                describeResultTypes(tab)
             }
         } catch {
-            statusText = ""
+            tab.statusText = ""
             self.error = DisplayedError("Query failed", error)
         }
         await refreshAPIUsage()
+    }
+
+    // MARK: - Tabs
+
+    /// Opens a new query tab after the current one and shows it.
+    func newTab(soql: String = "") {
+        let tab = QueryTab(soql: soql)
+        let index = (tabs.firstIndex { $0.id == selectedTabID } ?? tabs.count - 1) + 1
+        tabs.insert(tab, at: index)
+        selectedTabID = tab.id
+        workspace = .query
+        saveTabs()
+    }
+
+    /// Closes a tab, showing its neighbor. Closing the last tab leaves an empty one.
+    func closeTab(_ id: QueryTab.ID) {
+        guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        tabs.remove(at: index)
+        if tabs.isEmpty {
+            tabs = [QueryTab(soql: "")]
+        }
+        if selectedTabID == id {
+            selectedTabID = tabs[min(index, tabs.count - 1)].id
+        }
+        saveTabs()
+    }
+
+    func closeOtherTabs(than id: QueryTab.ID) {
+        tabs.removeAll { $0.id != id }
+        selectedTabID = id
+        saveTabs()
+    }
+
+    /// Shows the next tab (or the previous one with `offset: -1`), wrapping around.
+    func selectTab(offset: Int) {
+        guard let index = tabs.firstIndex(where: { $0.id == selectedTabID }) else { return }
+        selectedTabID = tabs[(index + offset + tabs.count) % tabs.count].id
+        saveTabs()
+    }
+
+    /// Remembers the tabs' queries for the next window.
+    private func saveTabs() {
+        UserDefaults.standard.set(tabs.map(\.soql), forKey: "queryTabs")
+        UserDefaults.standard.set(tabs.firstIndex { $0.id == selectedTabID } ?? 0, forKey: "selectedQueryTab")
     }
 
     // MARK: - Recent queries
@@ -395,44 +471,46 @@ final class ExplorerModel {
         }
     }
 
-    /// Fetches the next batch of rows for the current results.
-    func loadMore() async {
-        guard let client, let next = results?.nextRecordsURL, !isQuerying else { return }
-        isQuerying = true
-        defer { isQuerying = false }
+    /// Fetches the next batch of rows for a tab's results (the current tab's by default).
+    func loadMore(in tab: QueryTab? = nil) async {
+        let tab = tab ?? currentTab
+        guard let client, let next = tab.results?.nextRecordsURL, !tab.isQuerying else { return }
+        tab.isQuerying = true
+        defer { tab.isQuerying = false }
         let started = ContinuousClock.now
         do {
             let batch = try await client.queryMore(next)
-            results?.append(batch)
-            statusText = rowsLoadedStatus(time: Self.elapsed(since: started))
-            describeResultTypes()
+            tab.results?.append(batch)
+            tab.statusText = rowsLoadedStatus(tab, time: Self.elapsed(since: started))
+            describeResultTypes(tab)
         } catch {
             self.error = DisplayedError("Unable to load more rows", error)
         }
         await refreshAPIUsage()
     }
 
-    /// Fetches every remaining batch, e.g. before exporting.
+    /// Fetches every remaining batch of the current tab's results, e.g. before exporting.
     func loadAll() async {
-        while canLoadMore, error == nil {
-            await loadMore()
+        let tab = currentTab
+        while tab.results?.nextRecordsURL != nil, error == nil {
+            await loadMore(in: tab)
         }
     }
 
     func showChildResults(_ result: QueryResult, column: String, parentRowID: ResultRow.ID) {
         childResults = ResultSet(result: result, title: column, parentRowID: parentRowID)
-        describeResultTypes()
+        describeResultTypes(currentTab)
     }
 
-    private func rowsLoadedStatus(time: String) -> String {
-        guard let results else { return "" }
+    private func rowsLoadedStatus(_ tab: QueryTab, time: String) -> String {
+        guard let results = tab.results else { return "" }
         return "Loaded \(results.rows.count) of \(results.totalSize) total rows \(time)"
     }
 
     /// Describes the SObject types in the results in the background, so the table knows which
     /// fields can be edited.
-    private func describeResultTypes() {
-        let types = (results?.sobjectTypes ?? []).union(childResults?.sobjectTypes ?? [])
+    private func describeResultTypes(_ tab: QueryTab) {
+        let types = (tab.results?.sobjectTypes ?? []).union(tab.childResults?.sobjectTypes ?? [])
         for type in types where knownSObject(type) && cachedDescribe(type) == nil {
             Task { try? await describe(type) }
         }
@@ -476,9 +554,10 @@ final class ExplorerModel {
     func saveEdit(_ text: String, field: String, row: ResultRow) async -> Bool {
         guard let client, let id = row.recordID, let type = row.record.sobjectType else { return false }
         if (row.record[field]?.displayText ?? "") == text { return true }
+        let tab = currentTab
         isSaving = true
         defer { isSaving = false }
-        statusText = "Updating \(field) on \(id)…"
+        tab.statusText = "Updating \(field) on \(id)…"
         do {
             guard let fieldDescribe = try await describe(type).field(named: field) else {
                 throw InvalidFieldValue(errorDescription: "\(type) has no field named \(field).")
@@ -491,13 +570,16 @@ final class ExplorerModel {
             // a Task's reminder back off, so show what it kept.
             let saved = (try? await client.query("SELECT \(fieldDescribe.name) FROM \(type) WHERE Id = '\(id)'"))?
                 .records.first?[fieldDescribe.name] ?? value
-            results?.applyUpdate(recordID: id, field: field, value: saved)
-            childResults?.applyUpdate(recordID: id, field: field, value: saved)
-            statusText = saved == value ? "Updated \(field) on \(id)" : "Updated \(field) on \(id); Salesforce saved \(saved.displayText ?? "an empty value")"
+            // The record can be in other tabs' results too.
+            for tab in tabs {
+                tab.results?.applyUpdate(recordID: id, field: field, value: saved)
+                tab.childResults?.applyUpdate(recordID: id, field: field, value: saved)
+            }
+            tab.statusText = saved == value ? "Updated \(field) on \(id)" : "Updated \(field) on \(id); Salesforce saved \(saved.displayText ?? "an empty value")"
             await refreshAPIUsage()
             return true
         } catch {
-            statusText = ""
+            tab.statusText = ""
             self.error = DisplayedError("Unable to update \(field)", error)
             await refreshAPIUsage()
             return false
@@ -508,22 +590,23 @@ final class ExplorerModel {
     /// unchecked and show IsDeleted as false if it was queried; rows that fail stay checked and
     /// show why.
     func restoreCheckedRows() async {
-        guard let client, let checked = results?.checkedRows, !checked.isEmpty, !isSaving else { return }
-        let rows = (results?.rows ?? []).filter { checked.contains($0.id) && $0.recordID != nil }
+        let tab = currentTab
+        guard let client, let checked = tab.results?.checkedRows, !checked.isEmpty, !isSaving else { return }
+        let rows = (tab.results?.rows ?? []).filter { checked.contains($0.id) && $0.recordID != nil }
         isSaving = true
         defer { isSaving = false }
         var restored = 0
         var errors: [ResultRow.ID: String] = [:]
         for start in stride(from: 0, to: rows.count, by: 200) {
             let batch = rows[start..<min(start + 200, rows.count)]
-            statusText = "Restoring \(start + batch.count) of \(rows.count) rows…"
+            tab.statusText = "Restoring \(start + batch.count) of \(rows.count) rows…"
             do {
                 let saveResults = try await client.undelete(ids: batch.compactMap(\.recordID))
                 for (row, saveResult) in zip(batch, saveResults) {
                     if saveResult.success, let id = row.recordID {
                         restored += 1
-                        results?.checkedRows.remove(row.id)
-                        results?.applyUpdate(recordID: id, field: "IsDeleted", value: .bool(false))
+                        tab.results?.checkedRows.remove(row.id)
+                        tab.results?.applyUpdate(recordID: id, field: "IsDeleted", value: .bool(false))
                     } else {
                         errors[row.id] = saveResult.message
                     }
@@ -535,23 +618,24 @@ final class ExplorerModel {
                 break
             }
         }
-        results?.rowErrors = errors
-        statusText = "Restored \(restored) \(restored == 1 ? "row" : "rows")" + (errors.isEmpty ? "" : ", \(errors.count) failed")
+        tab.results?.rowErrors = errors
+        tab.statusText = "Restored \(restored) \(restored == 1 ? "row" : "rows")" + (errors.isEmpty ? "" : ", \(errors.count) failed")
         await refreshAPIUsage()
     }
 
     /// Deletes the records checked in the results, in batches of 200. Rows that fail stay checked
     /// and show why.
     func deleteCheckedRows() async {
-        guard let client, let checked = results?.checkedRows, !checked.isEmpty, !isSaving else { return }
-        let rows = (results?.rows ?? []).filter { checked.contains($0.id) && $0.recordID != nil }
+        let tab = currentTab
+        guard let client, let checked = tab.results?.checkedRows, !checked.isEmpty, !isSaving else { return }
+        let rows = (tab.results?.rows ?? []).filter { checked.contains($0.id) && $0.recordID != nil }
         isSaving = true
         defer { isSaving = false }
         var deleted = Set<ResultRow.ID>()
         var errors: [ResultRow.ID: String] = [:]
         for start in stride(from: 0, to: rows.count, by: 200) {
             let batch = rows[start..<min(start + 200, rows.count)]
-            statusText = "Deleting \(start + batch.count) of \(rows.count) rows…"
+            tab.statusText = "Deleting \(start + batch.count) of \(rows.count) rows…"
             do {
                 let saveResults = try await client.delete(ids: batch.compactMap(\.recordID))
                 for (row, saveResult) in zip(batch, saveResults) {
@@ -568,12 +652,12 @@ final class ExplorerModel {
                 break
             }
         }
-        results?.rowErrors = errors
-        results?.removeRows(deleted)
-        if let parent = childResults?.parentRowID, deleted.contains(parent) {
-            childResults = nil
+        tab.results?.rowErrors = errors
+        tab.results?.removeRows(deleted)
+        if let parent = tab.childResults?.parentRowID, deleted.contains(parent) {
+            tab.childResults = nil
         }
-        statusText = "Deleted \(deleted.count) \(deleted.count == 1 ? "row" : "rows")" + (errors.isEmpty ? "" : ", \(errors.count) failed")
+        tab.statusText = "Deleted \(deleted.count) \(deleted.count == 1 ? "row" : "rows")" + (errors.isEmpty ? "" : ", \(errors.count) failed")
         await refreshAPIUsage()
     }
 

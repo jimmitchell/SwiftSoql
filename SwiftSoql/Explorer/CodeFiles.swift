@@ -39,8 +39,7 @@ struct CodeFileHandling: ViewModifier {
                         model.apex.code = text
                         model.workspace = .apex
                     } else {
-                        model.soql = text
-                        model.workspace = .query
+                        model.newTab(soql: text)
                     }
                 } catch {
                     model.error = DisplayedError("Unable to open the file", error)

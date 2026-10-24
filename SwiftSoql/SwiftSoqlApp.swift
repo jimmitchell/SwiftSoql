@@ -71,6 +71,31 @@ struct QueryCommands: Commands {
 
     var body: some Commands {
         CommandMenu("Query") {
+            Button("New Query Tab") {
+                model?.newTab()
+            }
+            .keyboardShortcut("t")
+            .disabled(model?.isConnected != true)
+
+            Button("Close Query Tab") {
+                if let model { model.closeTab(model.selectedTabID) }
+            }
+            .disabled(model?.isConnected != true || model?.workspace != .query)
+
+            Button("Show Next Tab") {
+                model?.selectTab(offset: 1)
+            }
+            .keyboardShortcut(.tab, modifiers: .control)
+            .disabled(model?.isConnected != true || (model?.tabs.count ?? 0) < 2)
+
+            Button("Show Previous Tab") {
+                model?.selectTab(offset: -1)
+            }
+            .keyboardShortcut(.tab, modifiers: [.control, .shift])
+            .disabled(model?.isConnected != true || (model?.tabs.count ?? 0) < 2)
+
+            Divider()
+
             Button(model?.workspace == .apex ? "Execute Apex" : "Run Query") {
                 Task { await model?.run() }
             }
