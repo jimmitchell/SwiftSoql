@@ -23,7 +23,7 @@ struct QueryWorkspace: View {
             if let child = model.childResults {
                 VStack(spacing: 0) {
                     HStack {
-                        Text("\(child.title ?? "Child rows") — \(child.rows.count) of \(child.result.totalSize) rows")
+                        Text("\(child.title ?? "Child rows") — \(child.rows.count) of \(child.totalSize) rows")
                             .font(.callout.weight(.medium))
                         Spacer()
                         Button {
@@ -37,7 +37,7 @@ struct QueryWorkspace: View {
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
                     Divider()
-                    ResultsTable(resultSet: child)
+                    ResultsTable(resultSet: child, model: model)
                 }
                 .frame(minHeight: 100, idealHeight: 220)
             }
@@ -64,7 +64,7 @@ struct QueryWorkspace: View {
             }
         }
         .confirmationDialog("Export which rows?", isPresented: $isConfirmingExport) {
-            Button("All \(model.results?.result.totalSize ?? 0) Rows") {
+            Button("All \(model.results?.totalSize ?? 0) Rows") {
                 Task {
                     await model.loadAll()
                     prepareExport()
@@ -73,6 +73,13 @@ struct QueryWorkspace: View {
             Button("Loaded \(model.results?.rows.count ?? 0) Rows") { prepareExport() }
         } message: {
             Text("Exporting all rows fetches the rest of the results from Salesforce first.")
+        }
+        .confirmationDialog(deleteConfirmationTitle, isPresented: $model.isConfirmingDelete) {
+            Button("Delete", role: .destructive) {
+                Task { await model.deleteCheckedRows() }
+            }
+        } message: {
+            Text("Salesforce moves most deleted records to the Recycle Bin, where they can be restored.")
         }
     }
 
@@ -86,6 +93,13 @@ struct QueryWorkspace: View {
                 .truncationMode(.middle)
                 .foregroundStyle(.secondary)
             Spacer()
+            if let results = model.results, results.isEditable {
+                Button("Delete Checked") {
+                    model.isConfirmingDelete = true
+                }
+                .disabled(results.checkedRows.isEmpty || model.isSaving)
+                .help("Delete the checked rows' records")
+            }
             if model.canLoadMore {
                 Button("Load More") {
                     Task { await model.loadMore() }
@@ -117,13 +131,22 @@ struct QueryWorkspace: View {
     @ViewBuilder
     private var results: some View {
         if let results = model.results {
-            ResultsTable(resultSet: results) { child, column in
-                model.showChildResults(child, column: column)
+            ResultsTable(resultSet: results, model: model, checkedRows: results.isEditable ? checkedRows : nil) { child, column, rowID in
+                model.showChildResults(child, column: column, parentRowID: rowID)
             }
         } else {
             ContentUnavailableView("No Results", systemImage: "tablecells", description: Text("Write a query and press ⌘↩ to run it. Double-click an SObject or field in the sidebar to build one."))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    private var checkedRows: Binding<Set<ResultRow.ID>> {
+        Binding { model.results?.checkedRows ?? [] } set: { model.results?.checkedRows = $0 }
+    }
+
+    private var deleteConfirmationTitle: String {
+        let count = model.results?.checkedRows.count ?? 0
+        return "Delete \(count) \(count == 1 ? "record" : "records")?"
     }
 
     private func prepareExport() {

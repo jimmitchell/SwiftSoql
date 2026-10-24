@@ -90,6 +90,34 @@ nonisolated extension JSONValue {
         guard parser.atEnd else { throw parser.error("unexpected trailing content") }
         return value
     }
+
+    /// The value as JSON text, with object keys in order and numbers as they were given.
+    var serialized: String {
+        switch self {
+        case .null: "null"
+        case .bool(let b): b ? "true" : "false"
+        case .number(let n): n
+        case .string(let s): Self.quoted(s)
+        case .array(let a): "[" + a.map(\.serialized).joined(separator: ",") + "]"
+        case .object(let o): "{" + o.keys.map { Self.quoted($0) + ":" + (o[$0] ?? .null).serialized }.joined(separator: ",") + "}"
+        }
+    }
+
+    private static func quoted(_ s: String) -> String {
+        var out = "\""
+        for u in s.unicodeScalars {
+            switch u {
+            case "\"": out += "\\\""
+            case "\\": out += "\\\\"
+            case "\n": out += "\\n"
+            case "\r": out += "\\r"
+            case "\t": out += "\\t"
+            case _ where u.value < 0x20: out += String(format: "\\u%04x", u.value)
+            default: out.unicodeScalars.append(u)
+            }
+        }
+        return out + "\""
+    }
 }
 
 private nonisolated struct JSONParser {

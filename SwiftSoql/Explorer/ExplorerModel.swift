@@ -46,6 +46,10 @@ final class ExplorerModel {
     // Query
     var soql = UserDefaults.standard.string(forKey: "soql") ?? "SELECT Id, Name FROM Account"
     private(set) var isQuerying = false
+    /// True while an edit or delete is being saved.
+    private(set) var isSaving = false
+    /// Set to ask the user to confirm deleting the checked rows.
+    var isConfirmingDelete = false
     var results: ResultSet?
     /// A subquery result opened from a cell of `results`.
     var childResults: ResultSet?
@@ -158,7 +162,7 @@ final class ExplorerModel {
 
     // MARK: - Query
 
-    var canLoadMore: Bool { results?.result.nextRecordsURL != nil }
+    var canLoadMore: Bool { results?.nextRecordsURL != nil }
 
     /// Runs the query in the editor. `includeDeleted` uses queryAll, which also returns deleted and archived rows.
     func runQuery(includeDeleted: Bool = false) async {
@@ -181,6 +185,7 @@ final class ExplorerModel {
             } else {
                 results = ResultSet(result: result)
                 statusText = rowsLoadedStatus(time: time)
+                describeResultTypes()
             }
         } catch {
             statusText = ""
@@ -191,7 +196,7 @@ final class ExplorerModel {
 
     /// Fetches the next batch of rows for the current results.
     func loadMore() async {
-        guard let client, let next = results?.result.nextRecordsURL, !isQuerying else { return }
+        guard let client, let next = results?.nextRecordsURL, !isQuerying else { return }
         isQuerying = true
         defer { isQuerying = false }
         let started = ContinuousClock.now
@@ -199,6 +204,7 @@ final class ExplorerModel {
             let batch = try await client.queryMore(next)
             results?.append(batch)
             statusText = rowsLoadedStatus(time: Self.elapsed(since: started))
+            describeResultTypes()
         } catch {
             self.error = DisplayedError("Unable to load more rows", error)
         }
@@ -212,13 +218,98 @@ final class ExplorerModel {
         }
     }
 
-    func showChildResults(_ result: QueryResult, column: String) {
-        childResults = ResultSet(result: result, title: column)
+    func showChildResults(_ result: QueryResult, column: String, parentRowID: ResultRow.ID) {
+        childResults = ResultSet(result: result, title: column, parentRowID: parentRowID)
+        describeResultTypes()
     }
 
     private func rowsLoadedStatus(time: String) -> String {
         guard let results else { return "" }
-        return "Loaded \(results.rows.count) of \(results.result.totalSize) total rows \(time)"
+        return "Loaded \(results.rows.count) of \(results.totalSize) total rows \(time)"
+    }
+
+    /// Describes the SObject types in the results in the background, so the table knows which
+    /// fields can be edited.
+    private func describeResultTypes() {
+        let types = (results?.sobjectTypes ?? []).union(childResults?.sobjectTypes ?? [])
+        for type in types where knownSObject(type) && cachedDescribe(type) == nil {
+            Task { try? await describe(type) }
+        }
+    }
+
+    // MARK: - Editing
+
+    /// The fields of a result row's SObject type that can be edited, once it has been described.
+    func editableFields(of row: ResultRow) -> Set<String> {
+        guard row.recordID != nil, let type = row.record.sobjectType else { return [] }
+        return cachedDescribe(type)?.updateableFields ?? []
+    }
+
+    /// Saves text typed into a results cell to the record, and updates the results to match.
+    /// Returns whether the change was saved.
+    @discardableResult
+    func saveEdit(_ text: String, field: String, row: ResultRow) async -> Bool {
+        guard let client, let id = row.recordID, let type = row.record.sobjectType else { return false }
+        if (row.record[field]?.displayText ?? "") == text { return true }
+        isSaving = true
+        defer { isSaving = false }
+        statusText = "Updating \(field) on \(id)…"
+        do {
+            guard let fieldDescribe = try await describe(type).field(named: field) else {
+                throw InvalidFieldValue(errorDescription: "\(type) has no field named \(field).")
+            }
+            let value = try fieldDescribe.value(fromText: text)
+            var fields = JSONObject()
+            fields[fieldDescribe.name] = value
+            try await client.update(type, id: id, fields: fields)
+            results?.applyUpdate(recordID: id, field: field, value: value)
+            childResults?.applyUpdate(recordID: id, field: field, value: value)
+            statusText = "Updated \(field) on \(id)"
+            await refreshAPIUsage()
+            return true
+        } catch {
+            statusText = ""
+            self.error = DisplayedError("Unable to update \(field)", error)
+            await refreshAPIUsage()
+            return false
+        }
+    }
+
+    /// Deletes the records checked in the results, in batches of 200. Rows that fail stay checked
+    /// and show why.
+    func deleteCheckedRows() async {
+        guard let client, let checked = results?.checkedRows, !checked.isEmpty, !isSaving else { return }
+        let rows = (results?.rows ?? []).filter { checked.contains($0.id) && $0.recordID != nil }
+        isSaving = true
+        defer { isSaving = false }
+        var deleted = Set<ResultRow.ID>()
+        var errors: [ResultRow.ID: String] = [:]
+        for start in stride(from: 0, to: rows.count, by: 200) {
+            let batch = rows[start..<min(start + 200, rows.count)]
+            statusText = "Deleting \(start + batch.count) of \(rows.count) rows…"
+            do {
+                let saveResults = try await client.delete(ids: batch.compactMap(\.recordID))
+                for (row, saveResult) in zip(batch, saveResults) {
+                    if saveResult.success {
+                        deleted.insert(row.id)
+                    } else {
+                        errors[row.id] = saveResult.message
+                    }
+                }
+            } catch {
+                for row in rows[start...] {
+                    errors[row.id] = error.localizedDescription
+                }
+                break
+            }
+        }
+        results?.rowErrors = errors
+        results?.removeRows(deleted)
+        if let parent = childResults?.parentRowID, deleted.contains(parent) {
+            childResults = nil
+        }
+        statusText = "Deleted \(deleted.count) \(deleted.count == 1 ? "row" : "rows")" + (errors.isEmpty ? "" : ", \(errors.count) failed")
+        await refreshAPIUsage()
     }
 
     private static func elapsed(since start: ContinuousClock.Instant) -> String {
@@ -288,43 +379,4 @@ extension ExplorerModel: SoqlDescriber {
     var allQueryableSObjects: [String] {
         sobjects.filter(\.queryable).map(\.name)
     }
-}
-
-/// Loaded query results, with the columns to display them.
-struct ResultSet: Identifiable {
-    let id = UUID()
-    private(set) var result: QueryResult
-    private(set) var columns: [String]
-    private(set) var rows: [ResultRow]
-    /// For subquery results, the column they came from.
-    var title: String?
-
-    init(result: QueryResult, title: String? = nil) {
-        self.result = result
-        self.title = title
-        columns = QueryColumns.names(for: result.records, isSearchResult: result.isSearchResult)
-        rows = result.records.enumerated().map { ResultRow(id: $0.offset, record: $0.element) }
-    }
-
-    /// A starting width for a column that fits its name and the values in the first rows.
-    func idealWidth(for column: String) -> CGFloat {
-        let path = column.split(separator: ".")
-        let longest = rows.prefix(100).reduce(column.count) { longest, row in
-            max(longest, row.record.value(atPath: path)?.displayText?.count ?? 0)
-        }
-        return min(max(CGFloat(longest) * 7 + 16, 50), 320)
-    }
-
-    mutating func append(_ batch: QueryResult) {
-        let start = rows.count
-        result.append(batch)
-        rows += batch.records.enumerated().map { ResultRow(id: start + $0.offset, record: $0.element) }
-        // A later batch can resolve columns that were null in every earlier row.
-        columns = QueryColumns.names(for: result.records, isSearchResult: result.isSearchResult)
-    }
-}
-
-struct ResultRow: Identifiable {
-    let id: Int
-    let record: JSONObject
 }

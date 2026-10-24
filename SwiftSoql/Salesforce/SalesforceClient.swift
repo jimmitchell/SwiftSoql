@@ -26,6 +26,22 @@ nonisolated struct SalesforceError: LocalizedError {
     }
 }
 
+/// The outcome for one record of a delete.
+nonisolated struct SaveResult: Sendable {
+    let success: Bool
+    /// The errors, if it failed.
+    let message: String
+
+    init(json: JSONValue) {
+        success = json["success"]?.bool ?? false
+        message = (json["errors"]?.array ?? []).map { e in
+            let message = e["message"]?.string ?? ""
+            guard let code = e["statusCode"]?.string, !code.isEmpty else { return message }
+            return "\(code): \(message)"
+        }.joined(separator: "\n")
+    }
+}
+
 /// A minimal async client for the Salesforce REST API.
 ///
 /// When the access token expires it asks `reauthenticate` for a fresh session once,
@@ -74,16 +90,39 @@ actor SalesforceClient {
         QueryResult(json: try await get(nextRecordsURL))
     }
 
+    /// Changes fields on a record. A null value clears the field.
+    func update(_ sobject: String, id: String, fields: JSONObject) async throws {
+        _ = try await send("PATCH", "\(dataPath)/sobjects/\(Self.pathEncoded(sobject))/\(Self.pathEncoded(id))", body: .object(fields))
+    }
+
+    /// Deletes up to 200 records. Each record succeeds or fails on its own, and the results are in
+    /// the same order as `ids`.
+    func delete(ids: [String]) async throws -> [SaveResult] {
+        let json = try await send("DELETE", "\(dataPath)/composite/sobjects", query: [
+            URLQueryItem(name: "ids", value: ids.joined(separator: ",")),
+            URLQueryItem(name: "allOrNone", value: "false"),
+        ])
+        return (json.array ?? []).map(SaveResult.init)
+    }
+
     func get(_ path: String, query: [URLQueryItem] = []) async throws -> JSONValue {
+        try await send("GET", path, query: query)
+    }
+
+    private func send(_ method: String, _ path: String, query: [URLQueryItem] = [], body: JSONValue? = nil) async throws -> JSONValue {
         do {
-            return try await send(path: path, query: query)
+            return try await sendOnce(method, path, query: query, body: body)
         } catch let error as SalesforceError where error.isInvalidSession {
             session = try await reauthenticate()
-            return try await send(path: path, query: query)
+            return try await sendOnce(method, path, query: query, body: body)
         }
     }
 
-    private func send(path: String, query: [URLQueryItem]) async throws -> JSONValue {
+    private static func pathEncoded(_ s: String) -> String {
+        s.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))) ?? s
+    }
+
+    private func sendOnce(_ method: String, _ path: String, query: [URLQueryItem], body: JSONValue?) async throws -> JSONValue {
         guard var components = URLComponents(url: session.instanceURL, resolvingAgainstBaseURL: false) else {
             throw URLError(.badURL)
         }
@@ -94,8 +133,13 @@ actor SalesforceClient {
         guard let url = components.url else { throw URLError(.badURL) }
 
         var request = URLRequest(url: url)
+        request.httpMethod = method
         request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = Data(body.serialized.utf8)
+        }
 
         let (data, response) = try await urlSession.data(for: request)
         let http = response as? HTTPURLResponse

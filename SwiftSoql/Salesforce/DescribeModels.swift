@@ -23,12 +23,15 @@ nonisolated struct SObjectDescribe: Sendable {
     let name: String
     let fields: [FieldDescribe]
     let childRelationships: [ChildRelationship]
+    /// The names of the fields that can be changed on existing records.
+    let updateableFields: Set<String>
 
     init(json: JSONObject) {
         self.json = json
         name = json["name"]?.string ?? ""
         fields = (json["fields"]?.array ?? []).compactMap { $0.object.map(FieldDescribe.init) }
         childRelationships = (json["childRelationships"]?.array ?? []).compactMap { $0.object.map(ChildRelationship.init) }
+        updateableFields = Set(fields.filter(\.updateable).map(\.name))
     }
 
     func field(named name: String) -> FieldDescribe? {
@@ -59,6 +62,7 @@ nonisolated struct FieldDescribe: Sendable, Identifiable {
 
     var aggregatable: Bool { json["aggregatable"]?.bool ?? false }
     var groupable: Bool { json["groupable"]?.bool ?? false }
+    var updateable: Bool { json["updateable"]?.bool ?? false }
     /// A polymorphic relationship whose related record's fields come from the Name SObject.
     var namePointing: Bool { json["namePointing"]?.bool ?? false }
 
@@ -76,6 +80,33 @@ nonisolated struct FieldDescribe: Sendable, Identifiable {
         (json["picklistValues"]?.array ?? []).compactMap { v in
             guard let value = v["value"]?.string else { return nil }
             return (value, v["label"]?.string ?? value, v["active"]?.bool ?? true)
+        }
+    }
+}
+
+nonisolated struct InvalidFieldValue: LocalizedError {
+    let errorDescription: String?
+}
+
+nonisolated extension FieldDescribe {
+    /// The value to save for text typed into a results cell. Empty text clears the field.
+    func value(fromText text: String) throws -> JSONValue {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch type {
+        case "boolean":
+            switch trimmed.lowercased() {
+            case "true", "yes", "1": return .bool(true)
+            case "false", "no", "0", "": return .bool(false)
+            default: throw InvalidFieldValue(errorDescription: "\(name) must be true or false.")
+            }
+        case "int", "double", "currency", "percent":
+            if trimmed.isEmpty { return .null }
+            guard trimmed.wholeMatch(of: #/-?[0-9]+(\.[0-9]+)?/#) != nil else {
+                throw InvalidFieldValue(errorDescription: "\(name) must be a number, like 1234.5.")
+            }
+            return .number(trimmed)
+        default:
+            return text.isEmpty ? .null : .string(text)
         }
     }
 }

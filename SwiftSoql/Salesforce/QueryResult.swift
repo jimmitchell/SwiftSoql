@@ -58,3 +58,28 @@ nonisolated extension JSONObject {
         value(atPath: path.split(separator: "."))
     }
 }
+
+nonisolated extension JSONValue {
+    /// Sets a field on every record in this value with the given Id, including related records and
+    /// subquery rows. Records that don't include the field are left alone.
+    func updatingRecords(id: String, field: String, value: JSONValue) -> JSONValue {
+        switch self {
+        case .array(let items):
+            return .array(items.map { $0.updatingRecords(id: id, field: field, value: value) })
+        case .object(var obj):
+            for key in obj.keys where key != "attributes" {
+                if case .object = obj[key] {
+                    obj[key] = obj[key]?.updatingRecords(id: id, field: field, value: value)
+                } else if case .array = obj[key] {
+                    obj[key] = obj[key]?.updatingRecords(id: id, field: field, value: value)
+                }
+            }
+            if obj["Id"]?.string == id, obj[field] != nil {
+                obj[field] = value
+            }
+            return .object(obj)
+        default:
+            return self
+        }
+    }
+}

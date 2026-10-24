@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 enum ResultsExport {
     /// RFC 4180 CSV of every loaded row, with a header row of column names.
     static func csv(_ resultSet: ResultSet) -> String {
-        var lines = [resultSet.columns.map(quoted).joined(separator: ",")]
+        var lines = [resultSet.columns.map { quoted($0) }.joined(separator: ",")]
         for row in resultSet.rows {
             lines.append(resultSet.columns.map { quoted(csvText(row.record, column: $0)) }.joined(separator: ","))
         }

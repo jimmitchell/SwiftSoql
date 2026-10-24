@@ -57,6 +57,13 @@ struct QueryCommands: Commands {
             }
             .keyboardShortcut("m", modifiers: [.command, .shift])
             .disabled(model?.canLoadMore != true || model?.isQuerying == true)
+
+            Divider()
+
+            Button("Delete Checked Rows…") {
+                model?.isConfirmingDelete = true
+            }
+            .disabled(model?.results?.checkedRows.isEmpty != false || model?.isSaving == true)
         }
     }
 }
