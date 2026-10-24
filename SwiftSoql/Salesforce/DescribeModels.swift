@@ -6,6 +6,8 @@ nonisolated struct GlobalSObject: Sendable, Identifiable, Hashable {
     let label: String
     let custom: Bool
     let queryable: Bool
+    /// The first three characters of this SObject's record Ids, if it has records.
+    let keyPrefix: String?
 
     var id: String { name }
 
@@ -14,6 +16,7 @@ nonisolated struct GlobalSObject: Sendable, Identifiable, Hashable {
         label = json["label"]?.string ?? ""
         custom = json["custom"]?.bool ?? false
         queryable = json["queryable"]?.bool ?? false
+        keyPrefix = json["keyPrefix"]?.string
     }
 }
 

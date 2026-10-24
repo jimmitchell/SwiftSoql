@@ -78,6 +78,7 @@ final class ExplorerModel {
     @ObservationIgnored private var schemaObjects: [String: SoqlSchemaObject] = [:]
     @ObservationIgnored private var pendingSchemaObjects: Set<String> = []
     @ObservationIgnored private var sobjectNames: Set<String> = []
+    @ObservationIgnored private var sobjectsByKeyPrefix: [String: String] = [:]
 
     // Files
     /// Set by the File menu to show the open or save panel.
@@ -139,6 +140,7 @@ final class ExplorerModel {
             self.client = client
             sobjects = types.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
             sobjectNames = Set(sobjects.map { $0.name.lowercased() })
+            sobjectsByKeyPrefix = Dictionary(sobjects.compactMap { s in s.keyPrefix.map { ($0, s.name) } }, uniquingKeysWith: { a, _ in a })
             statusText = "Connected, \(sobjects.count) SObject types"
             recentQueries = UserDefaults.standard.stringArray(forKey: recentQueriesKey) ?? []
             pinnedQueries = UserDefaults.standard.stringArray(forKey: pinnedQueriesKey) ?? []
@@ -170,6 +172,7 @@ final class ExplorerModel {
         schemaObjects = [:]
         pendingSchemaObjects = []
         sobjectNames = []
+        sobjectsByKeyPrefix = [:]
         statusText = ""
         apiUsage = nil
         apex.clearRuns()
@@ -427,6 +430,28 @@ final class ExplorerModel {
         let types = (results?.sobjectTypes ?? []).union(childResults?.sobjectTypes ?? [])
         for type in types where knownSObject(type) && cachedDescribe(type) == nil {
             Task { try? await describe(type) }
+        }
+    }
+
+    // MARK: - Records in Salesforce
+
+    /// The SObject type of a record Id, if the text is an Id with a key prefix this org knows.
+    func sobjectType(ofRecordID text: String) -> String? {
+        guard text.count == 15 || text.count == 18, text.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber) }) else { return nil }
+        return sobjectsByKeyPrefix[String(text.prefix(3))]
+    }
+
+    /// The record's page in Salesforce. The browser's own Salesforce login is used.
+    func recordURL(_ id: String) -> URL? {
+        session?.instanceURL.appending(path: id)
+    }
+
+    /// The related records a result row refers to, as (column, record Id, SObject type).
+    func relatedRecords(in row: ResultRow, columns: [String]) -> [(column: String, id: String, type: String)] {
+        columns.compactMap { column in
+            guard column != "Id", let id = row.record.value(atPath: column)?.string, id != row.recordID,
+                  let type = sobjectType(ofRecordID: id) else { return nil }
+            return (column, id, type)
         }
     }
 

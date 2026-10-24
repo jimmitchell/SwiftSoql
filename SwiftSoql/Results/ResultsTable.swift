@@ -16,6 +16,10 @@ struct ResultsTable: View {
     var onOpenChild: (QueryResult, String, ResultRow.ID) -> Void = { _, _, _ in }
 
     @State private var selection = Set<ResultRow.ID>()
+    @Environment(\.openURL) private var openURL
+
+    /// More than this many records at once would flood the browser with tabs.
+    private static let maxRecordsToOpen = 20
 
     private enum Column: Hashable {
         case check
@@ -71,6 +75,8 @@ struct ResultsTable: View {
                 .disabled(ids.isEmpty)
             Button("Show in Loaded Order") { sortOrder.wrappedValue = [] }
                 .disabled(sortOrder.wrappedValue.isEmpty)
+            Divider()
+            openInSalesforceItems(ids)
             if let checkedRows {
                 Divider()
                 Button("Check Rows for Deletion") { checkedRows.wrappedValue.formUnion(ids) }
@@ -86,6 +92,29 @@ struct ResultsTable: View {
         .onCopyCommand {
             let text = ResultsExport.tabSeparated(resultSet, rowIDs: selection, includeHeader: false)
             return [NSItemProvider(object: text as NSString)]
+        }
+    }
+
+    @ViewBuilder
+    private func openInSalesforceItems(_ ids: Set<ResultRow.ID>) -> some View {
+        let recordIDs = resultSet.rows.filter { ids.contains($0.id) }.compactMap(\.recordID)
+        Button(recordIDs.count > 1 ? "Open \(recordIDs.count) Records in Salesforce" : "Open in Salesforce") {
+            for id in recordIDs {
+                if let url = model.recordURL(id) { openURL(url) }
+            }
+        }
+        .disabled(recordIDs.isEmpty || recordIDs.count > Self.maxRecordsToOpen)
+        if ids.count == 1, let row = resultSet.rows.first(where: { ids.contains($0.id) }) {
+            let related = model.relatedRecords(in: row, columns: resultSet.columns)
+            if !related.isEmpty {
+                Menu("Open Related Record") {
+                    ForEach(related, id: \.column) { record in
+                        Button("\(record.column) (\(record.type))") {
+                            if let url = model.recordURL(record.id) { openURL(url) }
+                        }
+                    }
+                }
+            }
         }
     }
 
