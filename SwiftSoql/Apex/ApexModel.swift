@@ -12,8 +12,10 @@ final class ApexModel {
     var logFilter = ""
     /// Which kind of log lines to show.
     var logLines = LogLines.all
-    /// The code selected in the editor, if any; Execute runs only that.
+    /// The selection or insertion point in the editor. Execute runs only selected code.
     var selectedRange: NSRange?
+    /// Set to show the sheet for managing snippets.
+    var isManagingSnippets = false
     /// A line of the code to move to, set when a line reference in the log is clicked.
     private(set) var revealLine: LineRequest?
 
@@ -112,6 +114,14 @@ final class ApexModel {
         let before = (code as NSString).substring(to: location)
         let lastLine = before.split(separator: "\n", omittingEmptySubsequences: false).last ?? ""
         return (before.count { $0 == "\n" }, lastLine.utf16.count)
+    }
+
+    /// Puts a snippet in place of the selection, or at the insertion point.
+    func insert(_ snippet: String) {
+        let ns = code as NSString
+        let range = selectedRange.flatMap { NSMaxRange($0) <= ns.length ? $0 : nil } ?? NSRange(location: ns.length, length: 0)
+        code = ns.replacingCharacters(in: range, with: snippet)
+        selectedRange = NSRange(location: range.location + (snippet as NSString).length, length: 0)
     }
 
     func clearRuns() {

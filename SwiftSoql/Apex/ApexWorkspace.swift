@@ -27,7 +27,13 @@ struct ApexWorkspace: View {
             }
             .frame(minHeight: 120, idealHeight: 450)
         }
+        .sheet(isPresented: $apex.isManagingSnippets) {
+            ApexSnippetsSheet(apex: apex)
+        }
         .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                snippetsMenu
+            }
             ToolbarItem(placement: .primaryAction) {
                 Menu {
                     ForEach(ApexLogCategory.allCases) { category in
@@ -56,6 +62,27 @@ struct ApexWorkspace: View {
                 .disabled(apex.isRunning || !model.canChangeData)
             }
         }
+    }
+
+    private var snippetsMenu: some View {
+        let snippets = ApexSnippets.shared
+        return Menu {
+            ForEach(snippets.snippets) { snippet in
+                Button(snippet.name) { apex.insert(snippet.code) }
+            }
+            if !snippets.snippets.isEmpty {
+                Divider()
+            }
+            Button(apex.selectedCode == nil ? "Save Code as Snippet" : "Save Selection as Snippet") {
+                snippets.add(apex.selectedCode ?? apex.code)
+            }
+            .disabled(apex.code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button("Manage Snippets…") { apex.isManagingSnippets = true }
+        } label: {
+            Label("Snippets", systemImage: "text.badge.plus")
+        }
+        .help("Insert a saved piece of Apex, or save the selection as one")
+        .accessibilityIdentifier("apexSnippets")
     }
 
     private var runsList: some View {

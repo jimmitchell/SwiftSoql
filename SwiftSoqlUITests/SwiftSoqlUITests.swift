@@ -274,6 +274,29 @@ final class SwiftSoqlUITests: XCTestCase {
     }
 
     @MainActor
+    func testApexSnippets() throws {
+        try XCTSkipIf(testOrg == nil, "Set SWIFTSOQL_TEST_ORG to run this test")
+        try launch()
+        app.typeKey("2", modifierFlags: .command)
+        let apexEditor = app.textViews["apexEditor"]
+        XCTAssertTrue(apexEditor.waitForExistence(timeout: 10))
+        apexEditor.click()
+        apexEditor.typeKey("a", modifierFlags: .command)
+        apexEditor.typeText("System.debug('snippet');")
+        apexEditor.typeKey("a", modifierFlags: .command)
+
+        let menu = app.descendants(matching: .any)["apexSnippets"].firstMatch
+        menu.click()
+        app.menuItems["Save Selection as Snippet"].click()
+
+        apexEditor.typeKey(.delete, modifierFlags: [])
+        XCTAssertEqual(apexEditor.value as? String, "")
+        menu.click()
+        app.menuItems["System.debug('snippet');"].click()
+        XCTAssertEqual(apexEditor.value as? String, "System.debug('snippet');", "Choosing the snippet inserts it")
+    }
+
+    @MainActor
     func testFormatQuery() throws {
         try XCTSkipIf(testOrg == nil, "Set SWIFTSOQL_TEST_ORG to run this test")
         try launch()

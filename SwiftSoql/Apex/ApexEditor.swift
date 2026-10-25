@@ -83,8 +83,7 @@ struct ApexEditor: NSViewRepresentable {
 
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
-            let range = textView.selectedRange()
-            let selection = range.length > 0 ? range : nil
+            let selection = textView.selectedRange()
             // The selection can change while SwiftUI updates the view, so record it afterwards.
             Task { @MainActor [parent] in
                 if parent.model.apex.selectedRange != selection {

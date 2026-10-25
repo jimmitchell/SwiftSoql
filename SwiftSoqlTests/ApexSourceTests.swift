@@ -80,3 +80,24 @@ struct ApexSelectionTests {
         #expect(model.selectedCode == nil, "Selecting only whitespace runs everything")
     }
 }
+
+struct ApexSnippetTests {
+    @Test func savesNamesAndInserts() throws {
+        let store = try #require(UserDefaults(suiteName: "ApexSnippetTests-\(UUID().uuidString)"))
+        let snippets = ApexSnippets(store: store)
+        snippets.add("\n   List<Account> accounts = [SELECT Id FROM Account LIMIT 10];\nSystem.debug(accounts);")
+        snippets.add("  ")
+        #expect(snippets.snippets.map(\.name) == ["List<Account> accounts = [SELECT Id FRO…", "Snippet"])
+        snippets.snippets[1].name = "Blank"
+        #expect(ApexSnippets(store: store).snippets.map(\.name) == ["List<Account> accounts = [SELECT Id FRO…", "Blank"], "Snippets are saved")
+
+        let apex = ApexModel()
+        apex.code = "Integer a = 1;\n"
+        apex.selectedRange = NSRange(location: 8, length: 1)
+        apex.insert("b")
+        #expect(apex.code == "Integer b = 1;\n" && apex.selectedRange == NSRange(location: 9, length: 0), "A snippet replaces the selection")
+        apex.selectedRange = nil
+        apex.insert("System.debug(b);")
+        #expect(apex.code == "Integer b = 1;\nSystem.debug(b);", "With no insertion point it goes at the end")
+    }
+}
