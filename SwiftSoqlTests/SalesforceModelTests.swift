@@ -17,6 +17,18 @@ struct JSONValueTests {
         #expect(try JSONValue.parse(Data(#""🙂""#.utf8)) == .string("🙂"))
     }
 
+    @Test func settingNilRemovesAKey() {
+        var o = JSONObject()
+        o["a"] = .string("1")
+        o["b"] = .null
+        o["c"] = .bool(true)
+        o["a"] = nil
+        #expect(o.keys == ["b", "c"] && o["a"] == nil && o["b"] == .null)
+        #expect(JSONValue.object(o).serialized == #"{"b":null,"c":true}"#)
+        o["missing"] = nil
+        #expect(o.count == 2)
+    }
+
     @Test func rejectsBadJSON() {
         #expect(throws: JSONParseError.self) { try JSONValue.parse(Data("{\"a\":}".utf8)) }
         #expect(throws: JSONParseError.self) { try JSONValue.parse(Data("[1] x".utf8)) }

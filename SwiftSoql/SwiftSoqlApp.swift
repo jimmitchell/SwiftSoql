@@ -127,7 +127,7 @@ struct QueryCommands: Commands {
 
             Divider()
 
-            Button(model?.workspace == .apex ? (model?.apex.selectedCode == nil ? "Execute Apex" : "Execute Selected Apex") : "Run Query") {
+            Button(model?.workspace == .apex ? (model?.apex.selectedCode == nil ? "Execute Apex" : "Execute Selected Apex") : model?.workspace == .tests ? "Run Checked Tests" : "Run Query") {
                 Task { await model?.run() }
             }
             .keyboardShortcut(.return, modifiers: .command)
@@ -150,6 +150,7 @@ struct QueryCommands: Commands {
                 Text("Anonymous Apex").tag(Workspace.apex).keyboardShortcut("2", modifiers: .command)
                 Text("Schema Diagram").tag(Workspace.schema).keyboardShortcut("3", modifiers: .command)
                 Text("Debug Logs").tag(Workspace.logs).keyboardShortcut("4", modifiers: .command)
+                Text("Apex Tests").tag(Workspace.tests).keyboardShortcut("5", modifiers: .command)
             }
             .pickerStyle(.inline)
             .disabled(model?.isConnected != true)

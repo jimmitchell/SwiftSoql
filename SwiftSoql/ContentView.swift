@@ -58,6 +58,7 @@ struct ExplorerView: View {
                 case .apex: ApexWorkspace(model: model)
                 case .schema: SchemaWorkspace(model: model)
                 case .logs: LogsWorkspace(model: model)
+                case .tests: TestsWorkspace(model: model)
                 }
             }
             .safeAreaInset(edge: .top, spacing: 0) {

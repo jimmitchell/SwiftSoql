@@ -26,6 +26,9 @@ A Mac app for exploring Salesforce orgs, written in SwiftUI. It's a port of Simo
 - **Debug logs:** the Logs workspace (⌘4) lists your logs, everyone's or one user's, shows a
   log with filters, starts and stops logging for you or another user, follows new logs, and
   deletes them.
+- **Apex tests:** the Tests workspace (⌘5) lists the org's own test classes; run the checked ones
+  or all local tests, see each method's result with links from stack traces into the class, and
+  see code coverage per class, with a class's covered and uncovered lines highlighted.
 - **Anonymous Apex:** run all of it or just the selected lines and read the debug log, with SOQL
   checking and completions in the editor, and a library of saved snippets.
 

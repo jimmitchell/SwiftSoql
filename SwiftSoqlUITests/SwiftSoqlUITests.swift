@@ -346,6 +346,36 @@ final class SwiftSoqlUITests: XCTestCase {
         XCTAssertTrue(start.waitForExistence(timeout: 30), "Stopping logging brings back Start Logging")
     }
 
+    /// Runs one test class and checks its result and the org's coverage.
+    @MainActor
+    func testRunApexTests() throws {
+        try XCTSkipIf(testOrg == nil, "Set SWIFTSOQL_TEST_ORG to run this test")
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["SWIFTSOQL_TEST_WRITES"] == "YES", "Set SWIFTSOQL_TEST_WRITES=YES to let this test run Apex tests")
+        try launch()
+        app.typeKey("5", modifierFlags: .command)
+        let classes = app.outlines.matching(identifier: "testClasses").firstMatch
+        let testClass = classes.checkBoxes["ChangePasswordControllerTest"]
+        XCTAssertTrue(testClass.waitForExistence(timeout: 60), "The org's test classes should be listed")
+        testClass.click()
+        app.buttons["Run Checked (1)"].click()
+        let summary = app.staticTexts["testSummary"]
+        let finished = NSPredicate(format: "value ENDSWITH 'failed' AND NOT (value BEGINSWITH '0 passed')")
+        wait(for: [XCTNSPredicateExpectation(predicate: finished, object: summary)], timeout: 300)
+        XCTAssertTrue(app.buttons["Run Checked (1)"].waitForExistence(timeout: 30), "The run should finish")
+        XCTAssertTrue(text("testChangePasswordController", in: app.outlines.matching(identifier: "testResults").firstMatch).exists)
+
+        app.windows.radioButtons["Coverage"].click()
+        let covered = text("ChangePasswordController", in: app.outlines.matching(identifier: "codeCoverage").firstMatch)
+        XCTAssertTrue(covered.waitForExistence(timeout: 30), "Coverage lists the class the test covers")
+
+        covered.doubleClick()
+        let source = app.textViews["apexSourceText"]
+        XCTAssertTrue(source.waitForExistence(timeout: 30), "Double-clicking a class shows its source")
+        XCTAssertTrue((source.value as? String ?? "").contains("class ChangePasswordController"))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "value ENDSWITH 'lines covered'")).firstMatch.exists, "The source shows how much is covered")
+        app.buttons["Done"].click()
+    }
+
     @MainActor
     func testFormatQuery() throws {
         try XCTSkipIf(testOrg == nil, "Set SWIFTSOQL_TEST_ORG to run this test")

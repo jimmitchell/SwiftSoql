@@ -393,8 +393,6 @@ actor SalesforceClient {
     /// with a debug level named SwiftSoql that this creates or updates.
     func startTraceFlag(for userID: String, until expiration: Date, levels: [ApexLogCategory: ApexLogLevel]) async throws -> TraceFlagInfo {
         var level = JSONObject()
-        level["DeveloperName"] = .string("SwiftSoql")
-        level["MasterLabel"] = .string("SwiftSoql")
         for category in ApexLogCategory.allCases {
             level[category.debugLevelField] = .string((levels[category] ?? category.defaultLevel).rawValue.uppercased())
         }
@@ -404,9 +402,10 @@ actor SalesforceClient {
         let levelID: String
         if let existing = try await query("SELECT Id FROM DebugLevel WHERE DeveloperName = 'SwiftSoql'", api: .tooling).records.first?["Id"]?.string {
             levelID = existing
-            level["DeveloperName"] = nil
             try await update("DebugLevel", id: existing, fields: level, api: .tooling)
         } else {
+            level["DeveloperName"] = .string("SwiftSoql")
+            level["MasterLabel"] = .string("SwiftSoql")
             levelID = try await create("DebugLevel", fields: level, api: .tooling)
         }
         var flag = JSONObject()
@@ -426,6 +425,91 @@ actor SalesforceClient {
     /// Stops recording debug logs by deleting the trace flag.
     func stopTraceFlag(_ id: String) async throws {
         _ = try await send("DELETE", "\(path(.tooling))/sobjects/TraceFlag/\(Self.pathEncoded(id))")
+    }
+
+    // MARK: Apex tests
+
+    /// Every row of a query, following its later batches.
+    private func allRecords(_ soql: String, api: SalesforceAPI = .data) async throws -> [JSONObject] {
+        var result = try await query(soql, api: api)
+        var records = result.records
+        while let next = result.nextRecordsURL {
+            result = try await queryMore(next)
+            records += result.records
+        }
+        return records
+    }
+
+    /// The org's own Apex classes that have tests, leaving out managed packages' classes.
+    func apexTestClasses() async throws -> [ApexTestClass] {
+        try await allRecords("SELECT Id, Name, Body FROM ApexClass WHERE NamespacePrefix = null ORDER BY Name")
+            .compactMap { r in
+                guard let id = r["Id"]?.string, let name = r["Name"]?.string, ApexTestClass.hasTests(r["Body"]?.string ?? "") else { return nil }
+                return ApexTestClass(id: id, name: name)
+            }
+    }
+
+    /// Starts running the tests in some classes, or with no classes, all local tests (every
+    /// test outside managed packages). Returns the run's job Id.
+    func runTests(classIDs: [String]) async throws -> String {
+        var body = JSONObject()
+        if classIDs.isEmpty {
+            body["testLevel"] = .string("RunLocalTests")
+        } else {
+            body["classids"] = .string(classIDs.joined(separator: ","))
+        }
+        guard let jobID = try await send("POST", "\(path(.tooling))/runTestsAsynchronous", body: .object(body)).string else {
+            throw SalesforceError(statusCode: 200, errorCode: "", message: "Salesforce didn't return the test run's job Id.")
+        }
+        return jobID
+    }
+
+    /// The classes of a test run and how far each has got.
+    func testQueue(jobID: String) async throws -> [TestQueueItem] {
+        try await allRecords("SELECT \(TestQueueItem.fields) FROM ApexTestQueueItem WHERE ParentJobId = '\(jobID)' ORDER BY ApexClass.Name")
+            .compactMap(TestQueueItem.init)
+    }
+
+    /// The results of a test run's methods so far.
+    func testResults(jobID: String) async throws -> [ApexTestMethodResult] {
+        try await allRecords("SELECT \(ApexTestMethodResult.fields) FROM ApexTestResult WHERE AsyncApexJobId = '\(jobID)' ORDER BY ApexClass.Name, MethodName")
+            .compactMap(ApexTestMethodResult.init)
+    }
+
+    /// Stops a test run's classes that haven't finished.
+    func abortTests(_ items: [TestQueueItem]) async throws {
+        let records = items.filter { !$0.isFinished }.map { item in
+            var record = JSONObject()
+            record["Id"] = .string(item.id)
+            record["Status"] = .string("Aborted")
+            return record
+        }
+        for start in stride(from: 0, to: records.count, by: Self.saveBatchLimit) {
+            _ = try await save(Array(records[start..<min(start + Self.saveBatchLimit, records.count)]), sobject: "ApexTestQueueItem", operation: .update)
+        }
+    }
+
+    /// The org-wide code coverage of every class and trigger, from the latest test runs.
+    func codeCoverage() async throws -> [ClassCoverage] {
+        try await allRecords("SELECT ApexClassOrTriggerId, ApexClassOrTrigger.Name, NumLinesCovered, NumLinesUncovered FROM ApexCodeCoverageAggregate", api: .tooling)
+            .compactMap(ClassCoverage.init)
+    }
+
+    /// One class's covered and uncovered line numbers. Salesforce only returns them for a
+    /// single class at a time.
+    func coveredLines(classID: String) async throws -> (covered: Set<Int>, uncovered: Set<Int>) {
+        let record = try await query("SELECT Coverage FROM ApexCodeCoverageAggregate WHERE ApexClassOrTriggerId = '\(classID)'", api: .tooling).records.first
+        let lines = { (key: String) in Set((record?["Coverage"]?[key]?.array ?? []).compactMap(\.int)) }
+        return (lines("coveredLines"), lines("uncoveredLines"))
+    }
+
+    /// A class's or trigger's Apex source.
+    func apexSource(id: String) async throws -> (name: String, body: String) {
+        let sobject = id.hasPrefix("01q") ? "ApexTrigger" : "ApexClass"
+        guard let record = try await query("SELECT Name, Body FROM \(sobject) WHERE Id = '\(id)'").records.first else {
+            throw SalesforceError(statusCode: 200, errorCode: "", message: "Couldn't find the Apex \(sobject == "ApexTrigger" ? "trigger" : "class") \(id).")
+        }
+        return (record["Name"]?.string ?? id, record["Body"]?.string ?? "")
     }
 
     /// Runs anonymous Apex and returns the outcome with its debug log.

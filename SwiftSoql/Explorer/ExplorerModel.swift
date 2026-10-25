@@ -31,6 +31,7 @@ enum Workspace: String, CaseIterable, Identifiable {
     case apex = "Apex"
     case schema = "Schema"
     case logs = "Logs"
+    case tests = "Tests"
 
     var id: String { rawValue }
 }
@@ -121,6 +122,7 @@ final class ExplorerModel {
     var workspace = Workspace.query
     let apex = ApexModel()
     let logs = LogsModel()
+    let tests = TestsModel()
 
     var isConnected: Bool { client != nil }
 
@@ -160,6 +162,8 @@ final class ExplorerModel {
         case .query: isConnected && !isQuerying
         case .apex: canChangeData && !apex.isRunning
         case .schema, .logs: false
+        // Running tests changes nothing, so a locked window can.
+        case .tests: isConnected && !tests.isRunning && !tests.checked.isEmpty
         }
     }
 
@@ -168,6 +172,7 @@ final class ExplorerModel {
         switch workspace {
         case .query: await runQuery(includeDeleted: includeDeleted)
         case .apex: await executeApex()
+        case .tests: await runTests(allLocal: false)
         case .schema, .logs: break
         }
     }
@@ -238,6 +243,7 @@ final class ExplorerModel {
         isLocked = false
         inspectedRecords = []
         logs.reset()
+        tests.reset()
         dataSchema.reset()
         toolingSchema.reset()
         for tab in tabs {

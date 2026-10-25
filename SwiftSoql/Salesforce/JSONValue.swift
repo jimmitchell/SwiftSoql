@@ -68,10 +68,17 @@ nonisolated struct JSONObject: Sendable, Equatable {
         storage.reserveCapacity(minimumCapacity)
     }
 
+    /// The value for a key. Setting nil removes the key; set `.null` for a JSON null.
     subscript(key: String) -> JSONValue? {
         get { storage[key] }
         set {
-            if storage.updateValue(newValue ?? .null, forKey: key) == nil {
+            guard let newValue else {
+                if storage.removeValue(forKey: key) != nil {
+                    keys.removeAll { $0 == key }
+                }
+                return
+            }
+            if storage.updateValue(newValue, forKey: key) == nil {
                 keys.append(key)
             }
         }
