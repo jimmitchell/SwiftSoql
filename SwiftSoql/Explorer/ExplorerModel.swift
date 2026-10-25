@@ -455,35 +455,36 @@ final class ExplorerModel {
         guard let results = tab.results else { return "" }
         let status = "Loaded \(results.rows.count) of \(results.totalSize) total rows \(time)"
         if results.nextRecordsURL != nil, results.rows.count >= Self.tableRowLimit {
-            return status + ". The table stops at \(Self.tableRowLimit.formatted()) rows; Export CSV gets them all."
+            return status + ". The table stops at \(Self.tableRowLimit.formatted()) rows; Export gets them all."
         }
         return status
     }
 
     // MARK: - Exporting
 
-    /// Writes every row of the current tab's query to a CSV file: the rows already loaded, then
-    /// the rest straight from Salesforce, without loading them into the table. Large exports use
-    /// a Bulk API job when the query allows it, and fall back to paging if the job can't run.
-    func exportAll(to url: URL) async {
+    /// Writes every row of the current tab's query to a CSV or JSON file: the rows already
+    /// loaded, then the rest straight from Salesforce, without loading them into the table. Large
+    /// CSV exports use a Bulk API job when the query allows it, and fall back to paging if the
+    /// job can't run.
+    func exportAll(to url: URL, format: ExportFormat = .csv) async {
         let tab = currentTab
         guard let client, let results = tab.results, !tab.isQuerying else { return }
         tab.isQuerying = true
         defer { tab.isQuerying = false }
         let started = ContinuousClock.now
         do {
-            let exporter = CSVExporter(client: client) { tab.statusText = $0 }
+            let exporter = ResultsExporter(client: client) { tab.statusText = $0 }
             var rows: Int?
-            if results.api == .data, results.totalSize > Self.bulkExportThreshold, let query = results.query, BulkExport.canRun(query) {
+            if format == .csv, results.api == .data, results.totalSize > Self.bulkExportThreshold, let query = results.query, BulkExport.canRun(query) {
                 do {
                     rows = try await exporter.bulk(query, includeDeleted: results.includesDeleted, to: url)
-                } catch let error as CSVExporter.BulkJobUnavailable {
+                } catch let error as ResultsExporter.BulkJobUnavailable {
                     // The job couldn't start or run; page through the results instead.
                     tab.statusText = "Bulk API unavailable (\(error.message)); exporting page by page…"
                 }
             }
             if rows == nil {
-                rows = try await exporter.paged(results, to: url)
+                rows = try await exporter.paged(results, format: format, to: url)
             }
             tab.statusText = "Exported \((rows ?? 0).formatted()) rows to \(url.lastPathComponent) \(Self.elapsed(since: started))"
         } catch {

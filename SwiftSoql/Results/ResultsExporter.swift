@@ -1,8 +1,16 @@
 import Foundation
 
-/// Writes every row of a query to a CSV file, without loading them into a results table: page by
-/// page through the query's remaining batches, or as a Bulk API job.
-struct CSVExporter {
+/// A file format for exported results.
+enum ExportFormat: String {
+    case csv
+    case json
+
+    var title: String { rawValue.uppercased() }
+}
+
+/// Writes every row of a query to a CSV or JSON file, without loading them into a results table:
+/// page by page through the query's remaining batches, or for CSV, as a Bulk API job.
+struct ResultsExporter {
     let client: SalesforceClient
     /// Called with a description of how far the export has got.
     let progress: (String) -> Void
@@ -13,19 +21,31 @@ struct CSVExporter {
     }
 
     /// Writes the rows already loaded, then fetches and writes the rest. Returns the rows written.
-    func paged(_ results: ResultSet, to url: URL) async throws -> Int {
+    func paged(_ results: ResultSet, format: ExportFormat, to url: URL) async throws -> Int {
         let file = try Self.createFile(at: url)
         defer { try? file.close() }
         let columns = results.columns
-        try file.write(contentsOf: Data((ResultsExport.csvHeader(columns) + results.rows.map { ResultsExport.csvLine($0.record, columns: columns) }.joined()).utf8))
-        var rows = results.rows.count
+        var rows = 0
+        // CSV rows each end in a line break; JSON elements are separated by commas.
+        func write(_ records: [JSONObject]) throws {
+            let text = switch format {
+            case .csv: records.map { ResultsExport.csvLine($0, columns: columns) }.joined()
+            case .json: records.enumerated().map { i, record in (rows + i == 0 ? "" : ",\n") + ResultsExport.jsonElement(record) }.joined()
+            }
+            try file.write(contentsOf: Data(text.utf8))
+            rows += records.count
+        }
+        try file.write(contentsOf: Data((format == .csv ? ResultsExport.csvHeader(columns) : "[\n").utf8))
+        try write(results.rows.map(\.record))
         var next = results.nextRecordsURL
         while let url = next {
             progress("Exporting \(rows.formatted()) of \(results.totalSize.formatted()) rows…")
             let batch = try await client.queryMore(url)
-            try file.write(contentsOf: Data(batch.records.map { ResultsExport.csvLine($0, columns: columns) }.joined().utf8))
-            rows += batch.records.count
+            try write(batch.records)
             next = batch.nextRecordsURL
+        }
+        if format == .json {
+            try file.write(contentsOf: Data("\n]\n".utf8))
         }
         return rows
     }

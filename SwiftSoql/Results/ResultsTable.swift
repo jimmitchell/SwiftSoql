@@ -76,6 +76,11 @@ struct ResultsTable: View {
                 .disabled(ids.isEmpty)
             Button("Copy with Column Names") { copy(ids, includeHeader: true) }
                 .disabled(ids.isEmpty)
+            Button("Copy as JSON") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(ResultsExport.json(resultSet.rows.filter { ids.contains($0.id) }.map(\.record)), forType: .string)
+            }
+            .disabled(ids.isEmpty)
             Button("Show in Loaded Order") { sortOrder.wrappedValue = [] }
                 .disabled(sortOrder.wrappedValue.isEmpty)
             Divider()

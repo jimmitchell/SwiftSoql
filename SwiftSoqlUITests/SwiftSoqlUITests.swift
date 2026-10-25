@@ -145,6 +145,24 @@ final class SwiftSoqlUITests: XCTestCase {
     }
 
     @MainActor
+    func testResultsAsJSON() throws {
+        try XCTSkipIf(testOrg == nil, "Set SWIFTSOQL_TEST_ORG to run this test")
+        try launch()
+        setQuery("SELECT Id, Name, (SELECT Id FROM Contacts) FROM Account ORDER BY Name LIMIT 3")
+        runQuery()
+        XCTAssertTrue(waitForStatus("Loaded"))
+        // In windows, not the Touch Bar's copy of the control.
+        app.windows.radioButtons["JSON"].click()
+        let json = app.textViews["resultsJSON"]
+        XCTAssertTrue(json.waitForExistence(timeout: 10))
+        let text = json.value as? String ?? ""
+        XCTAssertTrue(text.hasPrefix("[\n  {\n    \"attributes\": {\n      \"type\": \"Account\""), "The rows show as indented JSON")
+        XCTAssertTrue(text.contains("\"Contacts\""), "Subqueries are included")
+        app.windows.radioButtons["Table"].click()
+        XCTAssertTrue(results.waitForExistence(timeout: 10))
+    }
+
+    @MainActor
     func testFormatQuery() throws {
         try XCTSkipIf(testOrg == nil, "Set SWIFTSOQL_TEST_ORG to run this test")
         try launch()

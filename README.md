@@ -7,7 +7,8 @@ A Mac app for exploring Salesforce orgs, written in SwiftUI. It's a port of Simo
   completions; tabs, each on the data API or the Tooling API (⌃⌘T); query plans; formatting; recent and pinned queries.
 - **Results:** sort, edit in place (checkboxes, picklist menus, date pickers), create and clone
   records (⌃⌘N, or right-click a row), delete and restore
-  records, open them in Salesforce, and export to CSV (large exports use the Bulk API).
+  records, open them in Salesforce, view them as JSON, and export to CSV or JSON (large CSV
+  exports use the Bulk API).
 - **Import:** insert, update or upsert records from a CSV file (File ▸ Import CSV…, ⇧⌘I).
   Columns are matched to fields by name or label, and the mapping is remembered. Files of up to
   10,000 rows go 200 at a time; larger ones use a Bulk API job. Save Results writes each row

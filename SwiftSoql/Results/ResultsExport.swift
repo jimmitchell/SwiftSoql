@@ -37,6 +37,40 @@ enum ResultsExport {
         return "'" + value
     }
 
+    /// Records as an indented JSON array, as Salesforce returned them but with each
+    /// `attributes` object cut down to the record's type. Subquery results keep their
+    /// totalSize, done and records.
+    static func json(_ records: [JSONObject]) -> String {
+        JSONValue.array(records.map { trimmed(.object($0)) }).prettyPrinted() + "\n"
+    }
+
+    /// One record for a JSON file of many: indented one level, without a trailing newline.
+    static func jsonElement(_ record: JSONObject) -> String {
+        "  " + trimmed(.object(record)).prettyPrinted(indent: "  ")
+    }
+
+    private static func trimmed(_ value: JSONValue) -> JSONValue {
+        switch value {
+        case .object(let o):
+            var out = JSONObject()
+            for key in o.keys {
+                guard let child = o[key] else { continue }
+                if key == "attributes", let type = child["type"] {
+                    var attributes = JSONObject()
+                    attributes["type"] = type
+                    out[key] = .object(attributes)
+                } else {
+                    out[key] = trimmed(child)
+                }
+            }
+            return .object(out)
+        case .array(let a):
+            return .array(a.map(trimmed))
+        default:
+            return value
+        }
+    }
+
     /// Tab-separated rows for the clipboard, in table order.
     static func tabSeparated(_ resultSet: ResultSet, rowIDs: Set<ResultRow.ID>, includeHeader: Bool) -> String {
         var lines = includeHeader ? [resultSet.columns.joined(separator: "\t")] : []
@@ -70,9 +104,9 @@ enum ResultsExport {
     }
 }
 
-/// A CSV file for `fileExporter`.
-struct CSVDocument: FileDocument {
-    static let readableContentTypes: [UTType] = [.commaSeparatedText]
+/// An exported CSV or JSON file for `fileExporter`.
+struct ExportDocument: FileDocument {
+    static let readableContentTypes: [UTType] = [.commaSeparatedText, .json]
 
     var text: String
 

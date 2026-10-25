@@ -108,6 +108,19 @@ nonisolated extension JSONValue {
         }
     }
 
+    /// The value as JSON text indented by two spaces per level, for reading.
+    func prettyPrinted(indent: String = "") -> String {
+        let inner = indent + "  "
+        switch self {
+        case .array(let a) where !a.isEmpty:
+            return "[\n" + a.map { inner + $0.prettyPrinted(indent: inner) }.joined(separator: ",\n") + "\n" + indent + "]"
+        case .object(let o) where !o.keys.isEmpty:
+            return "{\n" + o.keys.map { inner + Self.quoted($0) + ": " + (o[$0] ?? .null).prettyPrinted(indent: inner) }.joined(separator: ",\n") + "\n" + indent + "}"
+        default:
+            return serialized
+        }
+    }
+
     private static func quoted(_ s: String) -> String {
         var out = "\""
         for u in s.unicodeScalars {

@@ -6,8 +6,10 @@ import UniformTypeIdentifiers
 struct QueryWorkspace: View {
     @Bindable var model: ExplorerModel
 
-    @State private var exportDocument: CSVDocument?
+    @State private var exportDocument: ExportDocument?
+    @State private var exportFormat = ExportFormat.csv
     @State private var isConfirmingExport = false
+    @AppStorage("showResultsAsJSON") private var showJSON = false
 
     var body: some View {
         VSplitView {
@@ -67,7 +69,7 @@ struct QueryWorkspace: View {
         .fileExporter(
             isPresented: Binding { exportDocument != nil } set: { if !$0 { exportDocument = nil } },
             document: exportDocument,
-            contentType: .commaSeparatedText,
+            contentType: exportFormat == .json ? .json : .commaSeparatedText,
             defaultFilename: "Query Results"
         ) { result in
             if case .failure(let error) = result {
@@ -78,7 +80,9 @@ struct QueryWorkspace: View {
             Button("All \((model.results?.totalSize ?? 0).formatted()) Rows…") { chooseFileForAllRows() }
             Button("Loaded \((model.results?.rows.count ?? 0).formatted()) Rows") { prepareExport() }
         } message: {
-            Text("Exporting all rows fetches the rest from Salesforce and writes them straight to the file, using the Bulk API for large exports when the query allows it.")
+            Text(exportFormat == .json
+                ? "Exporting all rows fetches the rest from Salesforce and writes them straight to the file."
+                : "Exporting all rows fetches the rest from Salesforce and writes them straight to the file, using the Bulk API for large exports when the query allows it.")
         }
         .sheet(item: $model.queryPlan) { plan in
             QueryPlanView(result: plan)
@@ -134,16 +138,26 @@ struct QueryWorkspace: View {
                 }
                 .disabled(model.isQuerying)
             }
-            Button {
-                if model.results?.nextRecordsURL != nil {
-                    isConfirmingExport = true
-                } else {
-                    prepareExport()
+            if model.results != nil {
+                Picker("Show", selection: $showJSON) {
+                    Text("Table").tag(false)
+                    Text("JSON").tag(true)
                 }
-            } label: {
-                Label("Export CSV", systemImage: "square.and.arrow.up")
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .help("Show the loaded rows as a table or as JSON")
+                .accessibilityIdentifier("resultsFormat")
             }
+            Menu {
+                Button("CSV…") { export(.csv) }
+                Button("JSON…") { export(.json) }
+            } label: {
+                Label("Export", systemImage: "square.and.arrow.up")
+            }
+            .fixedSize()
             .disabled(model.results == nil || model.isQuerying)
+            .accessibilityIdentifier("export")
             if let usage = model.apiUsage {
                 Text("API \(usage)")
                     .foregroundStyle(.secondary)
@@ -158,7 +172,9 @@ struct QueryWorkspace: View {
 
     @ViewBuilder
     private var results: some View {
-        if let results = model.results {
+        if let results = model.results, showJSON {
+            ResultsJSONView(resultSet: results)
+        } else if let results = model.results {
             ResultsTable(resultSet: results, model: model, checkedRows: results.isEditable ? checkedRows : nil, sortOrder: Binding {
                 model.results?.sortOrder ?? []
             } set: {
@@ -181,14 +197,25 @@ struct QueryWorkspace: View {
         return "Delete \(count) \(count == 1 ? "record" : "records")?"
     }
 
+    /// Exports the loaded rows, or asks whether to export them all when there are more.
+    private func export(_ format: ExportFormat) {
+        exportFormat = format
+        if model.results?.nextRecordsURL != nil {
+            isConfirmingExport = true
+        } else {
+            prepareExport()
+        }
+    }
+
     /// Asks where to save, then exports every row there.
     private func chooseFileForAllRows() {
+        let format = exportFormat
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [.commaSeparatedText]
-        panel.nameFieldStringValue = "Query Results.csv"
+        panel.allowedContentTypes = [format == .json ? .json : .commaSeparatedText]
+        panel.nameFieldStringValue = "Query Results." + format.rawValue
         let export = { (response: NSApplication.ModalResponse) in
             guard response == .OK, let url = panel.url else { return }
-            Task { await model.exportAll(to: url) }
+            Task { await model.exportAll(to: url, format: format) }
         }
         if let window = NSApp.keyWindow {
             panel.beginSheetModal(for: window, completionHandler: export)
@@ -199,6 +226,6 @@ struct QueryWorkspace: View {
 
     private func prepareExport() {
         guard let results = model.results else { return }
-        exportDocument = CSVDocument(text: ResultsExport.csv(results))
+        exportDocument = ExportDocument(text: exportFormat == .json ? ResultsExport.json(results.rows.map(\.record)) : ResultsExport.csv(results))
     }
 }
