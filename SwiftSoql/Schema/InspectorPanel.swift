@@ -45,35 +45,35 @@ struct RecentQueriesList: View {
 
     var body: some View {
         List(selection: $selection) {
-            ForEach(model.pinnedQueries, id: \.self) { query in
+            ForEach(model.history.pinned, id: \.self) { query in
                 row(query, isPinned: true)
             }
-            .onMove { model.movePinnedQueries(fromOffsets: $0, toOffset: $1) }
-            ForEach(model.recentQueries, id: \.self) { query in
+            .onMove { model.history.movePinned(fromOffsets: $0, toOffset: $1) }
+            ForEach(model.history.recent, id: \.self) { query in
                 row(query, isPinned: false)
             }
         }
         .accessibilityIdentifier("recentQueries")
         .contextMenu(forSelectionType: String.self) { queries in
-            let pinned = queries.filter(model.pinnedQueries.contains)
+            let pinned = queries.filter(model.history.pinned.contains)
             let recent = queries.subtracting(pinned)
             if !recent.isEmpty {
-                Button("Pin") { model.pinQueries(recent) }
+                Button("Pin") { model.history.pin(recent) }
             }
             if !pinned.isEmpty {
-                Button("Unpin") { model.unpinQueries(pinned) }
+                Button("Unpin") { model.history.unpin(pinned) }
             }
             Button("Copy") {
-                let all = model.pinnedQueries + model.recentQueries
+                let all = model.history.pinned + model.history.recent
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(all.filter(queries.contains).joined(separator: "\n\n"), forType: .string)
             }
             .disabled(queries.isEmpty)
-            Button("Remove") { model.removeQueries(queries) }
+            Button("Remove") { model.history.remove(queries) }
                 .disabled(queries.isEmpty)
             Divider()
-            Button("Clear Recent Queries") { model.clearRecentQueries() }
-                .disabled(model.recentQueries.isEmpty)
+            Button("Clear Recent Queries") { model.history.clearRecent() }
+                .disabled(model.history.recent.isEmpty)
         } primaryAction: { queries in
             if queries.count == 1, let query = queries.first {
                 Task { await model.useRecentQuery(query, run: true) }
@@ -85,7 +85,7 @@ struct RecentQueriesList: View {
             }
         }
         .overlay {
-            if model.recentQueries.isEmpty && model.pinnedQueries.isEmpty {
+            if model.history.recent.isEmpty && model.history.pinned.isEmpty {
                 ContentUnavailableView("No Recent Queries", systemImage: "clock", description: Text("Queries you run in this org appear here. Right-click one to pin it, so it's always kept."))
             }
         }
@@ -108,9 +108,9 @@ struct RecentQueriesList: View {
         .help(query)
             .swipeActions(edge: .trailing) {
                 if isPinned {
-                    Button("Unpin", systemImage: "pin.slash") { model.unpinQueries([query]) }
+                    Button("Unpin", systemImage: "pin.slash") { model.history.unpin([query]) }
                 } else {
-                    Button("Pin", systemImage: "pin") { model.pinQueries([query]) }
+                    Button("Pin", systemImage: "pin") { model.history.pin([query]) }
                         .tint(.orange)
                 }
             }

@@ -81,14 +81,13 @@ final class ExplorerModel {
     /// The plans for the current tab's query, while they're shown.
     var queryPlan: QueryPlanResult?
 
-    /// True while an edit or delete is being saved.
-    private(set) var isSaving = false
+    /// True while an edit or delete is being saved. Set only by the record changes in
+    /// ExplorerModel+Records.swift.
+    var isSaving = false
     /// Set to ask the user to confirm deleting the checked rows.
     var isConfirmingDelete = false
-    /// Queries run in this org, newest first. Pinned queries aren't included.
-    private(set) var recentQueries: [String] = []
-    /// Queries pinned in this org, which are kept however many queries are run.
-    private(set) var pinnedQueries: [String] = []
+    /// The queries run and pinned in this org.
+    let history = QueryHistory()
     /// The fields picked by double-clicking in the schema sidebar, for building a query.
     private var pickedFields: (sobject: String, fields: [String])?
 
@@ -177,10 +176,9 @@ final class ExplorerModel {
             sobjectsByKeyPrefix = Dictionary(sobjects.compactMap { s in s.keyPrefix.map { ($0, s.name) } }, uniquingKeysWith: { a, _ in a })
             statusText = "Connected, \(sobjects.count) SObject types"
             currentTab.statusText = statusText
-            recentQueries = AppDefaults.store.stringArray(forKey: recentQueriesKey) ?? []
+            history.load(username: session.username)
             let batchSize = AppDefaults.store.integer(forKey: "queryBatchSize")
             await client.setQueryBatchSize(batchSize > 0 ? batchSize : nil)
-            pinnedQueries = AppDefaults.store.stringArray(forKey: pinnedQueriesKey) ?? []
             startBackgroundDescribes()
             Task { [icons] in
                 if let theme = try? await client.theme() { icons.load(theme: theme) }
@@ -210,8 +208,7 @@ final class ExplorerModel {
             tab.statusText = ""
         }
         pickedFields = nil
-        recentQueries = []
-        pinnedQueries = []
+        history.load(username: nil)
         schemaObjects = [:]
         pendingSchemaObjects = []
         sobjectNames = []
@@ -363,7 +360,7 @@ final class ExplorerModel {
         do {
             let result = try await client.query(text, includeDeleted: includeDeleted)
             let time = Self.elapsed(since: started)
-            addRecentQuery(text)
+            history.add(text)
             tab.childResults = nil
             if result.records.isEmpty {
                 tab.results = nil
@@ -382,6 +379,15 @@ final class ExplorerModel {
             self.error = DisplayedError("Query failed", error)
         }
         await refreshAPIUsage()
+    }
+
+    /// Puts a recent query in the editor, optionally running it.
+    func useRecentQuery(_ text: String, run: Bool) async {
+        soql = text
+        workspace = .query
+        if run {
+            await runQuery()
+        }
     }
 
     /// Lays the current tab's query out on several lines. Only whitespace changes, and Undo
@@ -461,72 +467,7 @@ final class ExplorerModel {
         AppDefaults.store.set(tabs.firstIndex { $0.id == selectedTabID } ?? 0, forKey: "selectedQueryTab")
     }
 
-    // MARK: - Recent queries
-
-    private var recentQueriesKey: String { "recentQueries-\(session?.username ?? "")" }
-    private var pinnedQueriesKey: String { "pinnedQueries-\(session?.username ?? "")" }
-
-    private func addRecentQuery(_ text: String) {
-        // A pinned query stays where it was pinned.
-        guard !pinnedQueries.contains(text) else { return }
-        recentQueries.removeAll { $0 == text }
-        recentQueries.insert(text, at: 0)
-        saveQueries()
-    }
-
-    /// Saves the recent and pinned queries, keeping only as many recent ones as Settings allows.
-    private func saveQueries() {
-        let limit = max(1, AppDefaults.store.integer(forKey: "maxRecentQueries"))
-        if recentQueries.count > limit {
-            recentQueries.removeLast(recentQueries.count - limit)
-        }
-        AppDefaults.store.set(recentQueries, forKey: recentQueriesKey)
-        AppDefaults.store.set(pinnedQueries, forKey: pinnedQueriesKey)
-    }
-
-    /// Removes recent or pinned queries.
-    func removeQueries(_ queries: Set<String>) {
-        recentQueries.removeAll { queries.contains($0) }
-        pinnedQueries.removeAll { queries.contains($0) }
-        saveQueries()
-    }
-
-    func clearRecentQueries() {
-        recentQueries = []
-        saveQueries()
-    }
-
-    /// Moves recent queries to the end of the pinned ones, in the order they're listed.
-    func pinQueries(_ queries: Set<String>) {
-        pinnedQueries += recentQueries.filter(queries.contains)
-        recentQueries.removeAll { queries.contains($0) }
-        saveQueries()
-    }
-
-    /// Moves pinned queries back to the top of the recent ones.
-    func unpinQueries(_ queries: Set<String>) {
-        recentQueries.insert(contentsOf: pinnedQueries.filter(queries.contains), at: 0)
-        pinnedQueries.removeAll { queries.contains($0) }
-        saveQueries()
-    }
-
-    func movePinnedQueries(fromOffsets source: IndexSet, toOffset destination: Int) {
-        let moving = source.map { pinnedQueries[$0] }
-        for i in source.reversed() {
-            pinnedQueries.remove(at: i)
-        }
-        pinnedQueries.insert(contentsOf: moving, at: destination - source.count { $0 < destination })
-        saveQueries()
-    }
-
-    /// Puts a recent query in the editor, optionally running it.
-    func useRecentQuery(_ text: String, run: Bool) async {
-        soql = text
-        workspace = .query
-        if run {
-            await runQuery()
-        }
-    }
+    // MARK: - Loading more rows
 
     /// Fetches the next batch of rows for a tab's results (the current tab's by default).
     func loadMore(in tab: QueryTab? = nil) async {
@@ -581,93 +522,25 @@ final class ExplorerModel {
         defer { tab.isQuerying = false }
         let started = ContinuousClock.now
         do {
-            var rows = 0
-            var exported = false
+            let exporter = CSVExporter(client: client) { tab.statusText = $0 }
+            var rows: Int?
             if results.totalSize > Self.bulkExportThreshold, let query = results.query, BulkExport.canRun(query) {
                 do {
-                    rows = try await bulkExport(query, includeDeleted: results.includesDeleted, to: url, tab: tab, client: client)
-                    exported = true
-                } catch let error as BulkJobUnavailable {
+                    rows = try await exporter.bulk(query, includeDeleted: results.includesDeleted, to: url)
+                } catch let error as CSVExporter.BulkJobUnavailable {
                     // The job couldn't start or run; page through the results instead.
                     tab.statusText = "Bulk API unavailable (\(error.message)); exporting page by page…"
                 }
             }
-            if !exported {
-                rows = try await pagedExport(results, to: url, tab: tab, client: client)
+            if rows == nil {
+                rows = try await exporter.paged(results, to: url)
             }
-            tab.statusText = "Exported \(rows.formatted()) rows to \(url.lastPathComponent) \(Self.elapsed(since: started))"
+            tab.statusText = "Exported \((rows ?? 0).formatted()) rows to \(url.lastPathComponent) \(Self.elapsed(since: started))"
         } catch {
             tab.statusText = ""
             self.error = DisplayedError("Unable to export", error)
         }
         await refreshAPIUsage()
-    }
-
-    private struct BulkJobUnavailable: Error {
-        let message: String
-    }
-
-    private func pagedExport(_ results: ResultSet, to url: URL, tab: QueryTab, client: SalesforceClient) async throws -> Int {
-        let file = try Self.createFile(at: url)
-        defer { try? file.close() }
-        let columns = results.columns
-        try file.write(contentsOf: Data((ResultsExport.csvHeader(columns) + results.rows.map { ResultsExport.csvLine($0.record, columns: columns) }.joined()).utf8))
-        var rows = results.rows.count
-        var next = results.nextRecordsURL
-        while let url = next {
-            tab.statusText = "Exporting \(rows.formatted()) of \(results.totalSize.formatted()) rows…"
-            let batch = try await client.queryMore(url)
-            try file.write(contentsOf: Data(batch.records.map { ResultsExport.csvLine($0, columns: columns) }.joined().utf8))
-            rows += batch.records.count
-            next = batch.nextRecordsURL
-        }
-        return rows
-    }
-
-    private func bulkExport(_ query: String, includeDeleted: Bool, to url: URL, tab: QueryTab, client: SalesforceClient) async throws -> Int {
-        tab.statusText = "Starting a Bulk API job…"
-        let jobID: String
-        do {
-            jobID = try await client.startBulkQuery(query, includeDeleted: includeDeleted)
-        } catch {
-            throw BulkJobUnavailable(message: error.localizedDescription)
-        }
-        while true {
-            let status = try await client.bulkQueryStatus(jobID)
-            switch status.state {
-            case "JobComplete":
-                break
-            case "Failed", "Aborted":
-                throw BulkJobUnavailable(message: status.error ?? "the job \(status.state.lowercased())")
-            default:
-                tab.statusText = "Salesforce is preparing the export (\(status.processed.formatted()) rows so far)…"
-                try await Task.sleep(for: .seconds(2))
-                continue
-            }
-            break
-        }
-        let file = try Self.createFile(at: url)
-        defer { try? file.close() }
-        var rows = 0
-        var locator: String?
-        var first = true
-        repeat {
-            tab.statusText = "Downloading \(rows.formatted()) rows…"
-            let page = try await client.bulkQueryResults(jobID, locator: locator)
-            let converted = ResultsExport.bulkCSV(page.csv, includeHeader: first)
-            try file.write(contentsOf: Data(converted.text.utf8))
-            rows += converted.records
-            locator = page.nextLocator
-            first = false
-        } while locator != nil
-        return rows
-    }
-
-    private static func createFile(at url: URL) throws -> FileHandle {
-        guard FileManager.default.createFile(atPath: url.path, contents: nil) else {
-            throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: url.path])
-        }
-        return try FileHandle(forWritingTo: url)
     }
 
     /// Describes the SObject types in the results in the background, so the table knows which
@@ -679,149 +552,12 @@ final class ExplorerModel {
         }
     }
 
-    // MARK: - Records in Salesforce
+    // MARK: - Records
 
     /// The SObject type of a record Id, if the text is an Id with a key prefix this org knows.
     func sobjectType(ofRecordID text: String) -> String? {
         guard text.count == 15 || text.count == 18, text.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber) }) else { return nil }
         return sobjectsByKeyPrefix[String(text.prefix(3))]
-    }
-
-    /// The record's page in Salesforce. The browser's own Salesforce login is used.
-    func recordURL(_ id: String) -> URL? {
-        session?.instanceURL.appending(path: id)
-    }
-
-    /// The related records a result row refers to, as (column, record Id, SObject type).
-    func relatedRecords(in row: ResultRow, columns: [String]) -> [(column: String, id: String, type: String)] {
-        columns.compactMap { column in
-            guard column != "Id", let id = row.record.value(atPath: column)?.string, id != row.recordID,
-                  let type = sobjectType(ofRecordID: id) else { return nil }
-            return (column, id, type)
-        }
-    }
-
-    // MARK: - Editing
-
-    /// The field a results cell shows, if it can be edited: a top-level field the user may
-    /// update, once the row's SObject type has been described.
-    func editableField(_ column: String, of row: ResultRow) -> FieldDescribe? {
-        guard column != "Id", row.recordID != nil, let type = row.record.sobjectType,
-              let field = cachedDescribe(type)?.field(exactly: column), field.updateable else { return nil }
-        return field
-    }
-
-    /// Saves text typed into a results cell to the record, and updates the results to show the
-    /// value Salesforce saved. Returns whether the change was saved.
-    @discardableResult
-    func saveEdit(_ text: String, field: String, row: ResultRow) async -> Bool {
-        guard let client, let id = row.recordID, let type = row.record.sobjectType else { return false }
-        if (row.record[field]?.displayText ?? "") == text { return true }
-        let tab = currentTab
-        isSaving = true
-        defer { isSaving = false }
-        tab.statusText = "Updating \(field) on \(id)…"
-        do {
-            guard let fieldDescribe = try await describe(type).field(named: field) else {
-                throw InvalidFieldValue(errorDescription: "\(type) has no field named \(field).")
-            }
-            let value = try fieldDescribe.value(fromText: text)
-            var fields = JSONObject()
-            fields[fieldDescribe.name] = value
-            try await client.update(type, id: id, fields: fields)
-            // Salesforce can store something else, e.g. a trigger can change the value or turn
-            // a Task's reminder back off, so show what it kept.
-            let saved = (try? await client.query("SELECT \(fieldDescribe.name) FROM \(type) WHERE Id = '\(id)'"))?
-                .records.first?[fieldDescribe.name] ?? value
-            // The record can be in other tabs' results too.
-            for tab in tabs {
-                tab.results?.applyUpdate(recordID: id, field: field, value: saved)
-                tab.childResults?.applyUpdate(recordID: id, field: field, value: saved)
-            }
-            tab.statusText = saved == value ? "Updated \(field) on \(id)" : "Updated \(field) on \(id); Salesforce saved \(saved.displayText ?? "an empty value")"
-            await refreshAPIUsage()
-            return true
-        } catch {
-            tab.statusText = ""
-            self.error = DisplayedError("Unable to update \(field)", error)
-            await refreshAPIUsage()
-            return false
-        }
-    }
-
-    /// Restores the checked records from the Recycle Bin, in batches of 200. Restored rows are
-    /// unchecked and show IsDeleted as false if it was queried; rows that fail stay checked and
-    /// show why.
-    func restoreCheckedRows() async {
-        let tab = currentTab
-        guard let client, let checked = tab.results?.checkedRows, !checked.isEmpty, !isSaving else { return }
-        let rows = (tab.results?.rows ?? []).filter { checked.contains($0.id) && $0.recordID != nil }
-        isSaving = true
-        defer { isSaving = false }
-        var restored = 0
-        var errors: [ResultRow.ID: String] = [:]
-        for start in stride(from: 0, to: rows.count, by: 200) {
-            let batch = rows[start..<min(start + 200, rows.count)]
-            tab.statusText = "Restoring \(start + batch.count) of \(rows.count) rows…"
-            do {
-                let saveResults = try await client.undelete(ids: batch.compactMap(\.recordID))
-                for (row, saveResult) in zip(batch, saveResults) {
-                    if saveResult.success, let id = row.recordID {
-                        restored += 1
-                        tab.results?.checkedRows.remove(row.id)
-                        tab.results?.applyUpdate(recordID: id, field: "IsDeleted", value: .bool(false))
-                    } else {
-                        errors[row.id] = saveResult.message
-                    }
-                }
-            } catch {
-                for row in rows[start...] {
-                    errors[row.id] = error.localizedDescription
-                }
-                break
-            }
-        }
-        tab.results?.rowErrors = errors
-        tab.statusText = "Restored \(restored) \(restored == 1 ? "row" : "rows")" + (errors.isEmpty ? "" : ", \(errors.count) failed")
-        await refreshAPIUsage()
-    }
-
-    /// Deletes the records checked in the results, in batches of 200. Rows that fail stay checked
-    /// and show why.
-    func deleteCheckedRows() async {
-        let tab = currentTab
-        guard let client, let checked = tab.results?.checkedRows, !checked.isEmpty, !isSaving else { return }
-        let rows = (tab.results?.rows ?? []).filter { checked.contains($0.id) && $0.recordID != nil }
-        isSaving = true
-        defer { isSaving = false }
-        var deleted = Set<ResultRow.ID>()
-        var errors: [ResultRow.ID: String] = [:]
-        for start in stride(from: 0, to: rows.count, by: 200) {
-            let batch = rows[start..<min(start + 200, rows.count)]
-            tab.statusText = "Deleting \(start + batch.count) of \(rows.count) rows…"
-            do {
-                let saveResults = try await client.delete(ids: batch.compactMap(\.recordID))
-                for (row, saveResult) in zip(batch, saveResults) {
-                    if saveResult.success {
-                        deleted.insert(row.id)
-                    } else {
-                        errors[row.id] = saveResult.message
-                    }
-                }
-            } catch {
-                for row in rows[start...] {
-                    errors[row.id] = error.localizedDescription
-                }
-                break
-            }
-        }
-        tab.results?.rowErrors = errors
-        tab.results?.removeRows(deleted)
-        if let parent = tab.childResults?.parentRowID, deleted.contains(parent) {
-            tab.childResults = nil
-        }
-        tab.statusText = "Deleted \(deleted.count) \(deleted.count == 1 ? "row" : "rows")" + (errors.isEmpty ? "" : ", \(errors.count) failed")
-        await refreshAPIUsage()
     }
 
     private static func elapsed(since start: ContinuousClock.Instant) -> String {

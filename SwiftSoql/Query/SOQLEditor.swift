@@ -87,7 +87,7 @@ struct SOQLEditor: NSViewRepresentable {
             if isUpdatingView {
                 // During a view update the editor only changes the case of keywords, so skip the
                 // deferred write if the text has since been changed to something else.
-                DispatchQueue.main.async { [self] in
+                Task { @MainActor [self] in
                     if parent.text.caseInsensitiveCompare(newText) == .orderedSame {
                         parent.text = newText
                     }

@@ -42,6 +42,11 @@ nonisolated enum ApexSource {
         return ranges.sorted { $0.location < $1.location }
     }
 
+    private static let bindPattern = try! NSRegularExpression(pattern: #"(\b(?:IN|INCLUDES|EXCLUDES)\s+)?:\s*[A-Za-z_][A-Za-z0-9_.]*(?:\[[^\]]*\])?(?:\([^)]*\))?"#, options: [.caseInsensitive])
+
+    /// A type followed by a variable name, as in a declaration or a for loop.
+    private static let declarationPattern = try! NSRegularExpression(pattern: #"\b([A-Za-z_][A-Za-z0-9_]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|;|:|,|\))"#)
+
     /// The query with each bind variable (`:ids`, `:acc.Name`) replaced by a literal of the same
     /// length, so the SOQL checker can read it and positions don't move, and the binds' ranges.
     static func maskingBinds(in query: String) -> (query: String, binds: [NSRange]) {
@@ -49,8 +54,7 @@ nonisolated enum ApexSource {
         var masked = ""
         var binds: [NSRange] = []
         var last = 0
-        let pattern = try! NSRegularExpression(pattern: #"(\b(?:IN|INCLUDES|EXCLUDES)\s+)?:\s*[A-Za-z_][A-Za-z0-9_.]*(?:\[[^\]]*\])?(?:\([^)]*\))?"#, options: [.caseInsensitive])
-        for match in pattern.matches(in: query, range: NSRange(location: 0, length: ns.length)) {
+        for match in bindPattern.matches(in: query, range: NSRange(location: 0, length: ns.length)) {
             let listContext = match.range(at: 1).location != NSNotFound
             let bindStart = listContext ? NSMaxRange(match.range(at: 1)) : match.range.location
             let bind = NSRange(location: bindStart, length: NSMaxRange(match.range) - bindStart)
@@ -71,10 +75,9 @@ nonisolated enum ApexSource {
     /// Variables declared with an SObject type, such as `Account a = …` or
     /// `for (Contact c : contacts)`, keyed by lowercased name.
     static func sobjectVariables(in text: String, sobjectNamed: (String) -> String?) -> [String: String] {
-        let pattern = try! NSRegularExpression(pattern: #"\b([A-Za-z_][A-Za-z0-9_]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|;|:|,|\))"#)
+        let ns = text as NSString
         var types: [String: String] = [:]
-        for match in pattern.matches(in: text, range: NSRange(location: 0, length: (text as NSString).length)) {
-            let ns = text as NSString
+        for match in declarationPattern.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
             if let sobject = sobjectNamed(ns.substring(with: match.range(at: 1))) {
                 types[ns.substring(with: match.range(at: 2)).lowercased()] = sobject
             }

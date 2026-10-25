@@ -73,8 +73,7 @@ actor SalesforceClient {
     }
 
     func describe(_ sobject: String) async throws -> SObjectDescribe {
-        let name = sobject.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? sobject
-        let json = try await get("\(dataPath)/sobjects/\(name)/describe")
+        let json = try await get("\(dataPath)/sobjects/\(Self.pathEncoded(sobject))/describe")
         guard let obj = json.object else {
             throw SalesforceError(statusCode: 200, errorCode: "", message: "Unexpected describe response for \(sobject)")
         }
