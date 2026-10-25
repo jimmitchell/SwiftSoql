@@ -536,8 +536,9 @@ final class SwiftSoqlUITests: XCTestCase {
             app.buttons["Done"].click()
         }
 
-        // Insert: the row with a bad number fails without being sent.
-        try launch(extraArguments: ["-importCSV", try csvFile(1, "Name,NumberOfEmployees\n\(tag) A,1\n\(tag) B,2\n\(tag) C,3\n\(tag) X,lots\n")])
+        // Insert two rows per request: the row with a bad number fails without being sent.
+        try launch(extraArguments: ["-importCSV", try csvFile(1, "Name,NumberOfEmployees\n\(tag) A,1\n\(tag) B,2\n\(tag) C,3\n\(tag) X,lots\n"), "-importBatchSize", "2"])
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "value == 'Sends 2 rows at a time: 2 requests.'")).firstMatch.waitForExistence(timeout: 30), "The sheet says how it will send the rows")
         runImport("Insert", expect: "3 created, 1 failed")
 
         setQuery("SELECT Id, Name FROM Account WHERE Name LIKE '\(tag)%' ORDER BY Name")

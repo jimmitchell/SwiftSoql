@@ -87,6 +87,15 @@ struct ImportSheet: View {
                             .frame(maxWidth: 260)
                             .help("The field that finds existing records: Id, or an external Id field")
                         }
+                        if csvImport.operation != .hardDelete {
+                            Stepper(value: $csvImport.batchSize, in: 1...SalesforceClient.saveBatchLimit) {
+                                Text("\(csvImport.batchSize) rows per request")
+                                    .monospacedDigit()
+                            }
+                            .fixedSize()
+                            .help("Each request is one transaction: triggers and flows run on these rows together. Lower it if the import hits Apex limits.")
+                            .accessibilityIdentifier("importBatchSize")
+                        }
                         if csvImport.operation == .update || csvImport.operation == .upsert {
                             Toggle("Empty cells clear fields", isOn: $csvImport.clearEmpty)
                                 .help("Off: an empty cell leaves the field as it is. On: it clears the field.")
@@ -158,7 +167,7 @@ struct ImportSheet: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             } else if csvImport.plan != nil {
-                Text(csvImport.file.rows.count > ExplorerModel.bulkExportThreshold || csvImport.operation == .hardDelete ? "Uses a Bulk API job." : "Sends 200 rows at a time.")
+                Text(csvImport.usesBulkAPI ? "Uses a Bulk API job." : "Sends \(csvImport.batchSize) \(csvImport.batchSize == 1 ? "row" : "rows") at a time: \(csvImport.requestCount.formatted()) \(csvImport.requestCount == 1 ? "request" : "requests").")
                     .foregroundStyle(.secondary)
             }
             Spacer()

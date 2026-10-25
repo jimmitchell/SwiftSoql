@@ -2,8 +2,9 @@ import Foundation
 import Observation
 
 /// One CSV import: the file, how its columns map onto an SObject's fields, and its progress and
-/// outcome. Up to the Bulk API threshold, rows go to Salesforce 200 at a time with sObject
-/// Collections; larger files are one Bulk API 2.0 ingest job.
+/// outcome. Up to the Bulk API threshold, rows go to Salesforce in batches of up to 200 with
+/// sObject Collections; larger files are one Bulk API 2.0 ingest job, unless a smaller batch size
+/// is chosen, which only Collections can honor.
 @Observable
 final class CSVImport: Identifiable {
     let id = UUID()
@@ -18,6 +19,10 @@ final class CSVImport: Identifiable {
     var matchField = "Id"
     var mapping: ImportMapping
     var clearEmpty = false
+    /// Rows per Collections request, from 1 to 200; remembered as the default for later imports.
+    var batchSize = min(max(AppDefaults.store.integer(forKey: "importBatchSize"), 1), SalesforceClient.saveBatchLimit) {
+        didSet { AppDefaults.store.set(batchSize, forKey: "importBatchSize") }
+    }
     /// The SObject's describe, once it has loaded.
     private(set) var describe: SObjectDescribe?
     private(set) var describeError: String?
@@ -39,6 +44,15 @@ final class CSVImport: Identifiable {
         operation = file.header.contains { $0.caseInsensitiveCompare("Id") == .orderedSame } ? .update : .insert
         mapping = ImportMapping(fields: file.header.map { _ in nil })
     }
+
+    /// Whether the import runs as a Bulk API job: always for Hard Delete, and for large files
+    /// unless a batch size under 200 asks for smaller transactions than Bulk API jobs use.
+    var usesBulkAPI: Bool {
+        operation == .hardDelete || (file.rows.count > ExplorerModel.bulkExportThreshold && batchSize >= SalesforceClient.saveBatchLimit)
+    }
+
+    /// The requests a Collections import makes.
+    var requestCount: Int { (file.rows.count + batchSize - 1) / max(batchSize, 1) }
 
     var isRunning: Bool {
         if case .running = phase { true } else { false }
@@ -87,7 +101,7 @@ final class CSVImport: Identifiable {
         phase = .running(status: "Starting…", fraction: 0)
         task = Task {
             do {
-                if file.rows.count > ExplorerModel.bulkExportThreshold || plan.operation == .hardDelete {
+                if usesBulkAPI {
                     let (outcome, stopped) = try await bulkImport(plan)
                     phase = .finished(outcome, stopped: stopped)
                 } else {
@@ -111,7 +125,7 @@ final class CSVImport: Identifiable {
         let rows = file.rows
         var start = 0
         while start < rows.count, !Task.isCancelled {
-            let end = min(start + SalesforceClient.saveBatchLimit, rows.count)
+            let end = min(start + batchSize, rows.count)
             phase = .running(status: "Importing rows \((start + 1).formatted())–\(end.formatted()) of \(rows.count.formatted())…", fraction: Double(start) / Double(rows.count))
             var results: [Int: (id: String?, created: Bool, error: String?)] = [:]
             var records: [JSONObject] = []
