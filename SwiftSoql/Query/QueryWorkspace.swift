@@ -167,9 +167,11 @@ struct QueryWorkspace: View {
             .disabled(model.results == nil || model.isQuerying)
             .accessibilityIdentifier("export")
             if let usage = model.apiUsage {
-                Text("API \(usage)")
+                Button("API \(usage)") { model.isShowingLimits = true }
+                    .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
-                    .help("Daily API requests used / limit")
+                    .help("Daily API requests used / limit. Click to see all of the org's limits.")
+                    .accessibilityIdentifier("apiUsage")
             }
         }
         .font(.callout)

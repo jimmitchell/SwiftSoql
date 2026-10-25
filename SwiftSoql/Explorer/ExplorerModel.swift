@@ -250,6 +250,16 @@ final class ExplorerModel {
         icons.reset()
     }
 
+    /// Set to show the org's limits.
+    var isShowingLimits = false
+
+    func orgLimits() async throws -> [OrgLimit] {
+        guard let client else { throw CancellationError() }
+        let limits = try await client.limits()
+        await refreshAPIUsage()
+        return limits
+    }
+
     func refreshAPIUsage() async {
         apiUsage = await client?.apiUsage
     }

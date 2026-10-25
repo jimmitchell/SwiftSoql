@@ -220,6 +220,20 @@ final class SwiftSoqlUITests: XCTestCase {
     }
 
     @MainActor
+    func testOrgLimits() throws {
+        try XCTSkipIf(testOrg == nil, "Set SWIFTSOQL_TEST_ORG to run this test")
+        try launch()
+        setQuery("SELECT Id FROM User LIMIT 1")
+        runQuery()
+        let usage = app.buttons["apiUsage"]
+        XCTAssertTrue(usage.waitForExistence(timeout: 60))
+        usage.click()
+        let daily = app.windows.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Daily Api Requests' OR value CONTAINS 'Daily Api Requests'")).firstMatch
+        XCTAssertTrue(daily.waitForExistence(timeout: 30), "The limits sheet lists the org's limits")
+        app.buttons["Done"].click()
+    }
+
+    @MainActor
     func testFormatQuery() throws {
         try XCTSkipIf(testOrg == nil, "Set SWIFTSOQL_TEST_ORG to run this test")
         try launch()

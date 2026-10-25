@@ -162,6 +162,14 @@ struct QueryCommands: Commands {
 
             Divider()
 
+            Button("Org Limits…") {
+                model?.isShowingLimits = true
+            }
+            .keyboardShortcut("l", modifiers: [.command, .shift])
+            .disabled(model?.isConnected != true)
+
+            Divider()
+
             Button("Load More Rows") {
                 Task { await model?.loadMore() }
             }

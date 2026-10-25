@@ -149,6 +149,11 @@ actor SalesforceClient {
         queryBatchSize.map { ["Sforce-Query-Options": "batchSize=\($0)"] } ?? [:]
     }
 
+    /// The org's limits, such as daily API requests and data storage.
+    func limits() async throws -> [OrgLimit] {
+        OrgLimit.limits(from: try await get("\(dataPath)/limits"))
+    }
+
     /// The org's theme: SObject colors and icon URLs.
     func theme() async throws -> JSONValue {
         try await get("\(dataPath)/theme")

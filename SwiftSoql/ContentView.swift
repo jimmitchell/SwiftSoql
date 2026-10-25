@@ -75,6 +75,9 @@ struct ExplorerView: View {
         .sheet(item: $model.csvImport) { csvImport in
             ImportSheet(model: model, csvImport: csvImport)
         }
+        .sheet(isPresented: $model.isShowingLimits) {
+            OrgLimitsView(model: model)
+        }
         .inspector(isPresented: $showInspector) {
             InspectorPanel(model: model)
                 .inspectorColumnWidth(min: 240, ideal: 300, max: 500)
