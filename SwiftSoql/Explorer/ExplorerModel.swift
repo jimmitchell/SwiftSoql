@@ -119,6 +119,24 @@ final class ExplorerModel {
 
     var isConnected: Bool { client != nil }
 
+    // Production guard
+    /// The kind of org this window is connected to.
+    private(set) var orgKind: OrgKind?
+    /// Whether the org is guarded (production, usually), so the window starts read-only.
+    private(set) var isGuarded = false
+    /// While true, nothing in this window changes the org's data: no edits, new records,
+    /// deletes, restores, imports or anonymous Apex.
+    private(set) var isLocked = false
+
+    /// Whether the window can change the org's data.
+    var canChangeData: Bool { isConnected && !isLocked }
+
+    /// Locks or unlocks changes in a guarded org's window. The lock comes back on reconnecting.
+    func setLocked(_ locked: Bool) {
+        guard isGuarded else { return }
+        isLocked = locked
+    }
+
     init() {
         let defaults = AppDefaults.store
         let saved = defaults.stringArray(forKey: "queryTabs") ?? [defaults.string(forKey: "soql") ?? "SELECT Id, Name FROM Account"]
@@ -135,7 +153,7 @@ final class ExplorerModel {
     var canRun: Bool {
         switch workspace {
         case .query: isConnected && !isQuerying
-        case .apex: isConnected && !apex.isRunning
+        case .apex: canChangeData && !apex.isRunning
         case .schema: false
         }
     }
@@ -150,7 +168,7 @@ final class ExplorerModel {
     }
 
     func executeApex() async {
-        guard let client else { return }
+        guard let client, canChangeData else { return }
         do {
             try await apex.execute(using: client)
         } catch {
@@ -182,6 +200,12 @@ final class ExplorerModel {
             toolingSchema.reset()
             // The global describe doubles as a check that the session works.
             try await dataSchema.load(using: client)
+            // If the org's kind can't be read, guard it as if it were production.
+            let organization = try? await client.query(OrgKind.query).records.first
+            let kind = organization.map(OrgKind.init) ?? .unknown
+            orgKind = kind
+            isGuarded = kind.isGuarded(lockDeveloperEdition: AppDefaults.store.bool(forKey: "lockDeveloperEditionOrgs"))
+            isLocked = isGuarded
             self.session = session
             self.client = client
             statusText = "Connected, \(dataSchema.sobjects.count) SObject types"
@@ -204,6 +228,9 @@ final class ExplorerModel {
     func disconnect() {
         client = nil
         session = nil
+        orgKind = nil
+        isGuarded = false
+        isLocked = false
         dataSchema.reset()
         toolingSchema.reset()
         for tab in tabs {

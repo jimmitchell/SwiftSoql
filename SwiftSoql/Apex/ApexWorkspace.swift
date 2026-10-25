@@ -52,8 +52,8 @@ struct ApexWorkspace: View {
                 } label: {
                     Label("Execute", systemImage: "play.fill")
                 }
-                .help("Execute Apex (⌘↩)")
-                .disabled(apex.isRunning)
+                .help(model.isLocked ? "Unlock the window to run Apex in this org" : "Execute Apex (⌘↩)")
+                .disabled(apex.isRunning || !model.canChangeData)
             }
         }
     }

@@ -9,6 +9,9 @@ A Mac app for exploring Salesforce orgs, written in SwiftUI. It's a port of Simo
   records (⌃⌘N, or right-click a row), delete and restore
   records, open them in Salesforce, view them as JSON, and export to CSV or JSON (large CSV
   exports use the Bulk API).
+- **Production guard:** each window shows what kind of org it's connected to (production,
+  sandbox, Developer Edition, scratch or trial). Production windows open read-only, with no edits,
+  deletes, imports or anonymous Apex until you click the padlock in the toolbar.
 - **Import:** insert, update or upsert records from a CSV file (File ▸ Import CSV…, ⇧⌘I).
   Columns are matched to fields by name or label, and the mapping is remembered. Files of up to
   10,000 rows go 200 at a time; larger ones use a Bulk API job. Save Results writes each row

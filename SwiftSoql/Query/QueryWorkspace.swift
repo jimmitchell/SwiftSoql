@@ -95,7 +95,8 @@ struct QueryWorkspace: View {
                 Task { await model.deleteCheckedRows() }
             }
         } message: {
-            Text("Salesforce moves most deleted records to the Recycle Bin, where they can be restored.")
+            Text((model.isGuarded ? "This is a \(model.orgKind?.title.lowercased() ?? "production") org. " : "")
+                + "Salesforce moves most deleted records to the Recycle Bin, where they can be restored.")
         }
     }
 
@@ -109,14 +110,14 @@ struct QueryWorkspace: View {
                 .truncationMode(.middle)
                 .foregroundStyle(.secondary)
             Spacer()
-            if let results = model.results, results.isEditable, results.includesDeleted {
+            if let results = model.results, results.isEditable, results.includesDeleted, model.canChangeData {
                 Button("Restore Checked") {
                     Task { await model.restoreCheckedRows() }
                 }
                 .disabled(results.checkedRows.isEmpty || model.isSaving)
                 .help("Restore the checked rows' records from the Recycle Bin")
             }
-            if model.currentTab.api == .data {
+            if model.currentTab.api == .data, model.canChangeData {
                 Button {
                     model.newRecord()
                 } label: {
@@ -125,7 +126,7 @@ struct QueryWorkspace: View {
                 .disabled(model.isSaving)
                 .help("Create a record (⌃⌘N)")
             }
-            if let results = model.results, results.isEditable {
+            if let results = model.results, results.isEditable, model.canChangeData {
                 Button("Delete Checked") {
                     model.isConfirmingDelete = true
                 }
@@ -175,7 +176,7 @@ struct QueryWorkspace: View {
         if let results = model.results, showJSON {
             ResultsJSONView(resultSet: results)
         } else if let results = model.results {
-            ResultsTable(resultSet: results, model: model, checkedRows: results.isEditable ? checkedRows : nil, sortOrder: Binding {
+            ResultsTable(resultSet: results, model: model, checkedRows: results.isEditable && model.canChangeData ? checkedRows : nil, sortOrder: Binding {
                 model.results?.sortOrder ?? []
             } set: {
                 model.results?.sort(by: $0)

@@ -75,7 +75,7 @@ struct FileCommands: Commands {
                 }
             }
             .keyboardShortcut("i", modifiers: [.command, .shift])
-            .disabled(model?.isConnected != true || model?.csvImport != nil)
+            .disabled(model?.canChangeData != true || model?.csvImport != nil)
         }
         CommandGroup(replacing: .saveItem) {
             Button(model?.workspace == .apex ? "Save Apex…" : "Save Query…") {
@@ -169,17 +169,22 @@ struct QueryCommands: Commands {
                 model?.newRecord()
             }
             .keyboardShortcut("n", modifiers: [.control, .command])
-            .disabled(model?.isConnected != true || model?.workspace != .query || model?.currentTab.api != .data || model?.isSaving == true)
+            .disabled(model?.canChangeData != true || model?.workspace != .query || model?.currentTab.api != .data || model?.isSaving == true)
 
             Button("Restore Checked Rows") {
                 Task { await model?.restoreCheckedRows() }
             }
-            .disabled(model?.results?.includesDeleted != true || model?.results?.checkedRows.isEmpty != false || model?.isSaving == true)
+            .disabled(model?.canChangeData != true || model?.results?.includesDeleted != true || model?.results?.checkedRows.isEmpty != false || model?.isSaving == true)
 
             Button("Delete Checked Rows…") {
                 model?.isConfirmingDelete = true
             }
-            .disabled(model?.results?.checkedRows.isEmpty != false || model?.isSaving == true)
+            .disabled(model?.canChangeData != true || model?.results?.checkedRows.isEmpty != false || model?.isSaving == true)
+
+            if model?.isGuarded == true {
+                Divider()
+                Toggle("Allow Changes in This Window", isOn: Binding { model?.isLocked == false } set: { model?.setLocked(!$0) })
+            }
         }
     }
 }
@@ -192,6 +197,7 @@ struct SettingsView: View {
     @AppStorage("skipCompoundFieldsInGeneratedQueries") private var skipCompoundFields = false
     @AppStorage("maxRecentQueries") private var maxRecentQueries = 25
     @AppStorage("describeAllInBackground") private var describeAllInBackground = true
+    @AppStorage("lockDeveloperEditionOrgs") private var lockDeveloperEditionOrgs = false
     @State private var consumerKeys = BrowserLogin.consumerKeys
 
     var body: some View {
@@ -241,6 +247,12 @@ struct SettingsView: View {
             Section("Schema") {
                 Toggle("Describe every SObject after connecting", isOn: $describeAllInBackground)
                 Text("Lets the sidebar filter find fields in every SObject, at the cost of about one API request per 25 SObjects. Takes effect the next time you connect.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("Production Orgs") {
+                Toggle("Open Developer Edition orgs read-only too", isOn: $lockDeveloperEditionOrgs)
+                Text("Windows connected to production orgs open read-only: no edits, new records, deletes, imports or anonymous Apex until you click the padlock in the toolbar. Takes effect the next time you connect.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

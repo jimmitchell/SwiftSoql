@@ -19,7 +19,7 @@ extension ExplorerModel {
     /// The field a results cell shows, if it can be edited: a top-level field the user may
     /// update, once the row's SObject type has been described.
     func editableField(_ column: String, of row: ResultRow) -> FieldDescribe? {
-        guard column != "Id", row.recordID != nil, let type = row.record.sobjectType,
+        guard !isLocked, column != "Id", row.recordID != nil, let type = row.record.sobjectType,
               let field = dataSchema.cachedDescribe(type)?.field(exactly: column), field.updateable else { return nil }
         return field
     }
@@ -28,7 +28,7 @@ extension ExplorerModel {
     /// value Salesforce saved. Returns whether the change was saved.
     @discardableResult
     func saveEdit(_ text: String, field: String, row: ResultRow) async -> Bool {
-        guard let client, let id = row.recordID, let type = row.record.sobjectType else { return false }
+        guard let client, canChangeData, let id = row.recordID, let type = row.record.sobjectType else { return false }
         if (row.record[field]?.displayText ?? "") == text { return true }
         let tab = currentTab
         isSaving = true
@@ -94,7 +94,7 @@ extension ExplorerModel {
                                  with save: ([String]) async throws -> [SaveResult],
                                  apply: (QueryTab, [ResultRow]) -> Void) async {
         let tab = currentTab
-        guard let checked = tab.results?.checkedRows, !checked.isEmpty, !isSaving else { return }
+        guard canChangeData, let checked = tab.results?.checkedRows, !checked.isEmpty, !isSaving else { return }
         let rows = (tab.results?.rows ?? []).filter { checked.contains($0.id) && $0.recordID != nil }
         isSaving = true
         defer { isSaving = false }
@@ -136,6 +136,7 @@ extension ExplorerModel {
 
     /// Opens the form for a new record of the results' SObject, or the query's, if there is one.
     func newRecord() {
+        guard canChangeData else { return }
         let tab = currentTab
         var sobject = ""
         if let results = tab.results, results.api == .data, results.sobjectTypes.count == 1, let type = results.sobjectTypes.first {
@@ -148,7 +149,7 @@ extension ExplorerModel {
 
     /// Opens the form for a copy of a row's record, with every field a new record can set.
     func cloneRecord(_ row: ResultRow) async {
-        guard let client, let id = row.recordID, let type = row.record.sobjectType else { return }
+        guard let client, canChangeData, let id = row.recordID, let type = row.record.sobjectType else { return }
         currentTab.statusText = "Reading \(id)…"
         do {
             let describe = try await dataSchema.describe(type)
@@ -165,7 +166,7 @@ extension ExplorerModel {
     /// Creates the draft's record and, when the current tab's results are of the same SObject,
     /// adds it as their first row. Throws if it can't be created, so the form can show why.
     func createRecord(_ draft: RecordDraft) async throws {
-        guard let client else { return }
+        guard let client, canChangeData else { return }
         let tab = currentTab
         isSaving = true
         defer { isSaving = false }
@@ -198,7 +199,7 @@ extension ExplorerModel {
     /// Reads a CSV file and opens the import sheet for it. The SObject starts as the one the
     /// file is named after, if any, or the current results'.
     func beginImport(of url: URL) async {
-        guard let client else { return }
+        guard let client, canChangeData else { return }
         do {
             let file = try await Task.detached {
                 try ImportFile(name: url.lastPathComponent, text: String(contentsOf: url, encoding: .utf8))

@@ -85,7 +85,7 @@ struct ResultsTable: View {
                 .disabled(sortOrder.wrappedValue.isEmpty)
             Divider()
             openInSalesforceItems(ids)
-            if resultSet.isEditable, ids.count == 1, let row = resultSet.rows.first(where: { ids.contains($0.id) }), row.recordID != nil {
+            if resultSet.isEditable, model.canChangeData, ids.count == 1, let row = resultSet.rows.first(where: { ids.contains($0.id) }), row.recordID != nil {
                 Button("Clone Record…") {
                     Task { await model.cloneRecord(row) }
                 }

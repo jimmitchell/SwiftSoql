@@ -173,7 +173,7 @@ struct ImportSheet: View {
         .confirmationDialog(confirmationTitle, isPresented: $isConfirming) {
             Button(csvImport.operation.title) { csvImport.start() }
         } message: {
-            Text("This changes records in \(model.session?.displayName ?? "the org"). It can't be undone from SwiftSoql.")
+            Text("This changes records in \(model.session?.displayName ?? "the org")\(model.isGuarded ? ", a \(model.orgKind?.title.lowercased() ?? "production") org" : ""). It can't be undone from SwiftSoql.")
         }
     }
 

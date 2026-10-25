@@ -162,6 +162,32 @@ final class SwiftSoqlUITests: XCTestCase {
         XCTAssertTrue(results.waitForExistence(timeout: 10))
     }
 
+    /// With Developer Edition orgs set to open read-only, the test org's window starts locked:
+    /// no checkboxes or New Record until the padlock is clicked.
+    @MainActor
+    func testGuardedOrgStartsReadOnly() throws {
+        try XCTSkipIf(testOrg == nil, "Set SWIFTSOQL_TEST_ORG to run this test")
+        try launch(extraArguments: ["-lockDeveloperEditionOrgs", "YES"])
+        XCTAssertTrue(app.staticTexts["orgKind"].waitForExistence(timeout: 10), "The toolbar shows the org's kind")
+        let lock = app.descendants(matching: .any)["changesLock"].firstMatch
+        XCTAssertTrue(lock.exists, "A guarded org's window has a padlock")
+        setQuery("SELECT Id, Name FROM Account ORDER BY Name LIMIT 3")
+        runQuery()
+        XCTAssertTrue(waitForStatus("Loaded"))
+        XCTAssertFalse(results.checkBoxes.firstMatch.exists, "Rows can't be checked for deletion while locked")
+        XCTAssertFalse(app.buttons["New Record"].exists)
+        XCTAssertEqual(results.textFields.count, 0, "Cells aren't editable while locked")
+
+        lock.click()
+        let banner = app.descendants(matching: .any)["unlockedBanner"].firstMatch
+        XCTAssertTrue(banner.waitForExistence(timeout: 5), "Unlocking shows a warning banner")
+        XCTAssertTrue(results.checkBoxes.firstMatch.waitForExistence(timeout: 10), "Unlocked, rows can be checked")
+        XCTAssertTrue(app.buttons["New Record"].exists)
+
+        banner.buttons["Lock"].click()
+        XCTAssertFalse(results.checkBoxes.firstMatch.waitForExistence(timeout: 2), "Locking again removes the checkboxes")
+    }
+
     @MainActor
     func testFormatQuery() throws {
         try XCTSkipIf(testOrg == nil, "Set SWIFTSOQL_TEST_ORG to run this test")
