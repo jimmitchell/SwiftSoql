@@ -5,8 +5,19 @@ nonisolated enum ImportOperation: String, CaseIterable, Sendable {
     case insert
     case update
     case upsert
+    case delete
+    /// Deletes without the Recycle Bin. Only the Bulk API does this, and it needs the
+    /// "Bulk API Hard Delete" permission.
+    case hardDelete
 
-    var title: String { rawValue.capitalized }
+    var title: String {
+        switch self {
+        case .hardDelete: "Hard Delete"
+        default: rawValue.capitalized
+        }
+    }
+
+    var isDelete: Bool { self == .delete || self == .hardDelete }
 }
 
 /// A CSV file to import: its column names and its rows, each padded or cut to the header's width.
@@ -81,6 +92,7 @@ nonisolated struct ImportPlan: Sendable {
             case .insert: field.createable
             case .update: field.updateable || field.name == "Id"
             case .upsert: field.createable || field.updateable || field.name == "Id"
+            case .delete, .hardDelete: field.name == "Id"
             }
         }
         .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
@@ -95,7 +107,7 @@ nonisolated struct ImportPlan: Sendable {
     var keyField: String? {
         switch operation {
         case .insert: nil
-        case .update: "Id"
+        case .update, .delete, .hardDelete: "Id"
         case .upsert: matchField
         }
     }
@@ -108,7 +120,7 @@ nonisolated struct ImportPlan: Sendable {
             return "More than one column is mapped to \(duplicate)."
         }
         if let key = keyField, !mapped.contains(key) {
-            return "Map a column to \(key) to find the records to \(operation == .update ? "update" : "upsert")."
+            return "Map a column to \(key) to find the records to \(operation.title.lowercased())."
         }
         if operation == .insert, let missing = describe.fields.first(where: { $0.isRequiredOnCreate && !mapped.contains($0.name) }) {
             return "Map a column to \(missing.name), which new records need."

@@ -405,14 +405,19 @@ final class SwiftSoqlUITests: XCTestCase {
         XCTAssertTrue(waitForStatus("Loaded 4 of 4"), "A, B, C2 and D should exist")
         let employees = results.textFields.matching(NSPredicate(format: "value IN %@", ["10", "2", "30", "4"]))
         XCTAssertEqual(employees.count, 4, "The imported employee counts should be saved")
+        let allIDs = (0..<4).compactMap { results.outlineRows.element(boundBy: $0).staticTexts.element(boundBy: 0).value as? String }
+        XCTAssertEqual(allIDs.count, 4)
+        app.terminate()
 
-        results.outlineRows.element(boundBy: 0).coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)).rightClick()
-        app.menuItems["Check All Rows"].click()
-        app.buttons["Delete Checked"].click()
-        let confirm = app.buttons.matching(NSPredicate(format: "label == 'Delete'")).firstMatch
-        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
-        confirm.click()
-        XCTAssertTrue(waitForStatus("Deleted 4 rows"))
+        // Delete them all from a file of Ids.
+        try launch(extraArguments: ["-importCSV", try csvFile(4, "Id\n" + allIDs.joined(separator: "\n") + "\n")])
+        let delete = app.radioButtons["Delete"]
+        XCTAssertTrue(delete.waitForExistence(timeout: 30))
+        delete.click()
+        runImport("Delete", expect: "4 deleted, 0 failed")
+        setQuery("SELECT Id FROM Account WHERE Name LIKE '\(tag)%'")
+        runQuery()
+        XCTAssertTrue(waitForStatus("Query returned 0 rows"), "The Accounts should be gone")
     }
 
     @MainActor

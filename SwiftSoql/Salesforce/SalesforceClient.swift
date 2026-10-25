@@ -269,6 +269,9 @@ actor SalesforceClient {
             json = try await send("PATCH", "\(dataPath)/composite/sobjects", body: body)
         case .upsert:
             json = try await send("PATCH", "\(dataPath)/composite/sobjects/\(Self.pathEncoded(sobject))/\(Self.pathEncoded(matchField))", body: body)
+        case .delete, .hardDelete:
+            // Collections can't hard delete; imports send those to the Bulk API.
+            return try await delete(ids: records.compactMap { $0["Id"]?.string })
         }
         return (json.array ?? []).map { json in
             var result = SaveResult(json: json)

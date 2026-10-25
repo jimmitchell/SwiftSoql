@@ -59,6 +59,17 @@ struct ImportTests {
         #expect(plan.problem == nil)
     }
 
+    @Test func deletesNeedOnlyIds() throws {
+        let d = try describe()
+        #expect(ImportPlan.mappableFields(d, operation: .delete).map(\.name) == ["Id"])
+        var plan = ImportPlan(describe: d, operation: .hardDelete, mapping: ImportMapping(fields: [nil, "Name"]))
+        #expect(plan.problem?.contains("hard delete") == true)
+        plan.mapping.fields = ["Id", nil]
+        #expect(plan.problem == nil)
+        #expect(try plan.uploadValues(["001000000000001AAA", "Acme"]) == ["001000000000001AAA"])
+        #expect(throws: InvalidFieldValue.self) { try plan.record(["", "Acme"]) }
+    }
+
     @Test func rowsBecomeRecordsAndUploads() throws {
         let d = try describe()
         var plan = ImportPlan(describe: d, operation: .update, mapping: ImportMapping(fields: ["Id", "Name", "NumberOfEmployees", nil]))

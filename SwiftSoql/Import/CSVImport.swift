@@ -87,7 +87,7 @@ final class CSVImport: Identifiable {
         phase = .running(status: "Starting…", fraction: 0)
         task = Task {
             do {
-                if file.rows.count > ExplorerModel.bulkExportThreshold {
+                if file.rows.count > ExplorerModel.bulkExportThreshold || plan.operation == .hardDelete {
                     let (outcome, stopped) = try await bulkImport(plan)
                     phase = .finished(outcome, stopped: stopped)
                 } else {

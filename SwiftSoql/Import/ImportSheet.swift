@@ -87,7 +87,7 @@ struct ImportSheet: View {
                             .frame(maxWidth: 260)
                             .help("The field that finds existing records: Id, or an external Id field")
                         }
-                        if csvImport.operation != .insert {
+                        if csvImport.operation == .update || csvImport.operation == .upsert {
                             Toggle("Empty cells clear fields", isOn: $csvImport.clearEmpty)
                                 .help("Off: an empty cell leaves the field as it is. On: it clears the field.")
                         }
@@ -158,7 +158,7 @@ struct ImportSheet: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             } else if csvImport.plan != nil {
-                Text(csvImport.file.rows.count > ExplorerModel.bulkExportThreshold ? "Uses a Bulk API job." : "Sends 200 rows at a time.")
+                Text(csvImport.file.rows.count > ExplorerModel.bulkExportThreshold || csvImport.operation == .hardDelete ? "Uses a Bulk API job." : "Sends 200 rows at a time.")
                     .foregroundStyle(.secondary)
             }
             Spacer()
@@ -171,9 +171,10 @@ struct ImportSheet: View {
         }
         .padding(12)
         .confirmationDialog(confirmationTitle, isPresented: $isConfirming) {
-            Button(csvImport.operation.title) { csvImport.start() }
+            Button(csvImport.operation.title, role: csvImport.operation.isDelete ? .destructive : nil) { csvImport.start() }
         } message: {
-            Text("This changes records in \(model.session?.displayName ?? "the org")\(model.isGuarded ? ", a \(model.orgKind?.title.lowercased() ?? "production") org" : ""). It can't be undone from SwiftSoql.")
+            Text("This changes records in \(model.session?.displayName ?? "the org")\(model.isGuarded ? ", a \(model.orgKind?.title.lowercased() ?? "production") org" : ""). "
+                + (csvImport.operation == .hardDelete ? "Hard-deleted records skip the Recycle Bin and can't be restored." : csvImport.operation == .delete ? "Deleted records go to the Recycle Bin." : "It can't be undone from SwiftSoql."))
         }
     }
 
@@ -244,8 +245,12 @@ struct ImportSheet: View {
 
     private func summary(_ outcome: ImportOutcome) -> String {
         var parts: [String] = []
-        if outcome.created > 0 { parts.append("\(outcome.created.formatted()) created") }
-        if outcome.updated > 0 { parts.append("\(outcome.updated.formatted()) updated") }
+        if csvImport.operation.isDelete {
+            parts.append("\((outcome.created + outcome.updated).formatted()) deleted")
+        } else {
+            if outcome.created > 0 { parts.append("\(outcome.created.formatted()) created") }
+            if outcome.updated > 0 { parts.append("\(outcome.updated.formatted()) updated") }
+        }
         parts.append("\(outcome.failed.formatted()) failed")
         return parts.joined(separator: ", ")
     }
