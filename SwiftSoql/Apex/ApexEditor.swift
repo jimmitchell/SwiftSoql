@@ -81,6 +81,18 @@ struct ApexEditor: NSViewRepresentable {
             self.parent = parent
         }
 
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            let range = textView.selectedRange()
+            let selection = range.length > 0 ? range : nil
+            // The selection can change while SwiftUI updates the view, so record it afterwards.
+            Task { @MainActor [parent] in
+                if parent.model.apex.selectedRange != selection {
+                    parent.model.apex.selectedRange = selection
+                }
+            }
+        }
+
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             if parent.text != textView.string {
@@ -206,9 +218,9 @@ struct ApexEditor: NSViewRepresentable {
 
         /// From the error's column to the end of its line. Lines and columns count from 1.
         private static func errorRange(_ error: ApexExecution, in text: NSString) -> NSRange? {
-            guard error.line > 0 else { return nil }
+            guard error.editorLine > 0 else { return nil }
             var lineStart = 0
-            for _ in 1..<error.line {
+            for _ in 1..<error.editorLine {
                 let newline = text.range(of: "\n", range: NSRange(location: lineStart, length: text.length - lineStart))
                 guard newline.location != NSNotFound else { return nil }
                 lineStart = NSMaxRange(newline)
@@ -218,7 +230,7 @@ struct ApexEditor: NSViewRepresentable {
             while lineEnd > lineStart, [0x0A, 0x0D].contains(text.character(at: lineEnd - 1)) {
                 lineEnd -= 1
             }
-            let start = min(lineStart + max(error.column - 1, 0), lineEnd)
+            let start = min(lineStart + max(error.editorColumn - 1, 0), lineEnd)
             // An error at the end of a line still needs something to underline.
             if start == lineEnd {
                 return lineEnd > lineStart ? NSRange(location: lineEnd - 1, length: 1) : nil

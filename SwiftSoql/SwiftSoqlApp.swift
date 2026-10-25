@@ -127,7 +127,7 @@ struct QueryCommands: Commands {
 
             Divider()
 
-            Button(model?.workspace == .apex ? "Execute Apex" : "Run Query") {
+            Button(model?.workspace == .apex ? (model?.apex.selectedCode == nil ? "Execute Apex" : "Execute Selected Apex") : "Run Query") {
                 Task { await model?.run() }
             }
             .keyboardShortcut(.return, modifiers: .command)

@@ -247,6 +247,32 @@ final class SwiftSoqlUITests: XCTestCase {
         XCTAssertTrue(text.contains("| `LastName` | Last Name | string(80) | Yes |"), "Contact's required LastName is listed with its size")
     }
 
+    /// Runs the first line of some Apex, then the broken second line, whose error is reported
+    /// on the editor's line 2.
+    @MainActor
+    func testExecuteSelectedApex() throws {
+        try XCTSkipIf(testOrg == nil, "Set SWIFTSOQL_TEST_ORG to run this test")
+        try launch()
+        app.typeKey("2", modifierFlags: .command)
+        let apexEditor = app.textViews["apexEditor"]
+        XCTAssertTrue(apexEditor.waitForExistence(timeout: 10))
+        apexEditor.click()
+        apexEditor.typeKey("a", modifierFlags: .command)
+        apexEditor.typeText("System.debug('one');\nInteger broken = ;")
+        let runs = app.outlines.matching(identifier: "apexRuns").firstMatch
+
+        apexEditor.typeKey(.upArrow, modifierFlags: .command)
+        apexEditor.typeKey(.rightArrow, modifierFlags: [.command, .shift])
+        app.typeKey(.return, modifierFlags: .command)
+        XCTAssertTrue(text("Success", in: runs).waitForExistence(timeout: 60), "The selected first line runs on its own")
+
+        apexEditor.typeKey(.downArrow, modifierFlags: .command)
+        apexEditor.typeKey(.leftArrow, modifierFlags: [.command, .shift])
+        app.typeKey(.return, modifierFlags: .command)
+        let error = runs.staticTexts.matching(NSPredicate(format: "value BEGINSWITH 'Line 2:'")).firstMatch
+        XCTAssertTrue(error.waitForExistence(timeout: 60), "The selection's error is on the editor's line 2")
+    }
+
     @MainActor
     func testFormatQuery() throws {
         try XCTSkipIf(testOrg == nil, "Set SWIFTSOQL_TEST_ORG to run this test")

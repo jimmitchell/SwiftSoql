@@ -12,6 +12,8 @@ final class ApexModel {
     var logFilter = ""
     /// Which kind of log lines to show.
     var logLines = LogLines.all
+    /// The code selected in the editor, if any; Execute runs only that.
+    var selectedRange: NSRange?
     /// A line of the code to move to, set when a line reference in the log is clicked.
     private(set) var revealLine: LineRequest?
 
@@ -72,20 +74,44 @@ final class ApexModel {
 
     /// The most recent run, if it failed on code that is still in the editor, for marking the error.
     var currentError: ApexExecution? {
-        guard let run = runs.first, !run.success, run.code == code, run.line > 0 else { return nil }
+        guard let run = runs.first, !run.success, (run.editorCode ?? run.code) == code, run.line > 0 else { return nil }
         return run
     }
 
-    /// Runs the code in the editor and selects the new run.
+    /// The selected part of the code, if any.
+    var selectedCode: String? {
+        let ns = code as NSString
+        guard let range = selectedRange, range.length > 0, NSMaxRange(range) <= ns.length else { return nil }
+        let text = ns.substring(with: range)
+        return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : text
+    }
+
+    /// Runs the selected code, or all of it, and selects the new run.
     func execute(using client: SalesforceClient) async throws {
         let code = code
         guard !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !isRunning else { return }
         isRunning = true
         defer { isRunning = false }
         AppDefaults.store.set(code, forKey: "apex")
-        let run = try await client.executeAnonymous(code, logLevels: logLevels)
-        runs.insert(run, at: 0)
-        selectedRunID = run.id
+        if let part = selectedCode, let range = selectedRange {
+            var run = try await client.executeAnonymous(part, logLevels: logLevels)
+            (run.lineOffset, run.columnOffset) = Self.offsets(before: range.location, in: code)
+            run.editorCode = code
+            runs.insert(run, at: 0)
+            selectedRunID = run.id
+        } else {
+            let run = try await client.executeAnonymous(code, logLevels: logLevels)
+            runs.insert(run, at: 0)
+            selectedRunID = run.id
+        }
+    }
+
+    /// The lines before a position in the code, and the columns before it on its line, to turn
+    /// a selection run's lines and columns into the editor's.
+    static func offsets(before location: Int, in code: String) -> (lines: Int, columns: Int) {
+        let before = (code as NSString).substring(to: location)
+        let lastLine = before.split(separator: "\n", omittingEmptySubsequences: false).last ?? ""
+        return (before.count { $0 == "\n" }, lastLine.utf16.count)
     }
 
     func clearRuns() {

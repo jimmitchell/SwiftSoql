@@ -50,9 +50,9 @@ struct ApexWorkspace: View {
                 Button {
                     Task { await model.executeApex() }
                 } label: {
-                    Label("Execute", systemImage: "play.fill")
+                    Label(apex.selectedCode == nil ? "Execute" : "Execute Selection", systemImage: "play.fill")
                 }
-                .help(model.isLocked ? "Unlock the window to run Apex in this org" : "Execute Apex (⌘↩)")
+                .help(model.isLocked ? "Unlock the window to run Apex in this org" : apex.selectedCode == nil ? "Execute Apex (⌘↩)" : "Execute the selected code (⌘↩)")
                 .disabled(apex.isRunning || !model.canChangeData)
             }
         }
@@ -102,7 +102,7 @@ struct ApexWorkspace: View {
             .contextMenu(forSelectionType: ApexExecution.ID.self) { ids in
                 Button("Restore Code") {
                     if let run = apex.runs.first(where: { ids.contains($0.id) }) {
-                        apex.code = run.code
+                        apex.code = run.editorCode ?? run.code
                     }
                 }
                 .disabled(ids.count != 1)
@@ -155,7 +155,7 @@ struct ApexWorkspace: View {
                 failureBanner(run)
                 Divider()
             }
-            LogTextView(text: apex.displayedLog) { apex.reveal(line: $0) }
+            LogTextView(text: apex.displayedLog) { apex.reveal(line: $0 + (apex.selectedRun?.lineOffset ?? 0)) }
                 .accessibilityIdentifier("debugLog")
                 .overlay {
                     if let run = apex.selectedRun, run.debugLog.isEmpty {
@@ -193,14 +193,14 @@ struct ApexWorkspace: View {
 
     private func summary(_ run: ApexExecution) -> String {
         guard !run.success, run.line > 0 else { return run.resultText }
-        return "Line \(run.line): \(run.resultText)"
+        return "Line \(run.editorLine): \(run.resultText)"
     }
 
     /// The full result, with where it happened and the stack trace.
     private func details(_ run: ApexExecution) -> String {
         var lines = [run.resultText]
         if !run.success, run.line > 0 {
-            lines.append("Line \(run.line), column \(run.column)")
+            lines.append("Line \(run.editorLine), column \(run.editorColumn)")
         }
         if let trace = run.exceptionStackTrace, !trace.isEmpty {
             lines.append(trace)

@@ -59,6 +59,15 @@ nonisolated struct ApexExecution: Identifiable, Sendable {
     let exceptionMessage: String?
     let exceptionStackTrace: String?
     let debugLog: String
+    /// For a run of selected code: the editor's lines before the selection, the columns before it
+    /// on its first line, and the editor's whole code at the time.
+    var lineOffset = 0
+    var columnOffset = 0
+    var editorCode: String?
+
+    /// Where the run failed, counted in the editor's code.
+    var editorLine: Int { line > 0 ? line + lineOffset : line }
+    var editorColumn: Int { line == 1 ? column + columnOffset : column }
 
     /// A one-line summary, as SoqlXplorer shows it.
     var resultText: String {

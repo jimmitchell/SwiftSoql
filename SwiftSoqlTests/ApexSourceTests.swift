@@ -64,3 +64,19 @@ struct ApexSourceTests {
         #expect(first?.line == 4 && model.revealLine?.id != first?.id, "Clicking the same line again still moves to it")
     }
 }
+
+struct ApexSelectionTests {
+    @Test func selectionOffsetsMapBackToTheEditor() {
+        let code = "Integer a = 1;\n  System.debug(a);\nInteger b = ;"
+        #expect(ApexModel.offsets(before: 0, in: code) == (0, 0))
+        let second = (code as NSString).range(of: "System").location
+        #expect(ApexModel.offsets(before: second, in: code) == (1, 2))
+
+        let model = ApexModel()
+        model.code = code
+        model.selectedRange = NSRange(location: second, length: 16)
+        #expect(model.selectedCode == "System.debug(a);")
+        model.selectedRange = NSRange(location: 14, length: 1)
+        #expect(model.selectedCode == nil, "Selecting only whitespace runs everything")
+    }
+}
