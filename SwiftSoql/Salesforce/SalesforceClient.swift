@@ -205,6 +205,24 @@ actor SalesforceClient {
     }
 
     /// Changes fields on a record. A null value clears the field.
+    /// Creates a record and returns its Id.
+    func create(_ sobject: String, fields: JSONObject) async throws -> String {
+        let json = try await send("POST", "\(dataPath)/sobjects/\(Self.pathEncoded(sobject))", body: .object(fields))
+        guard let id = json["id"]?.string else {
+            throw SalesforceError(statusCode: 200, errorCode: "", message: "Salesforce didn't return the new record's Id.")
+        }
+        return id
+    }
+
+    /// Every field of one record.
+    func record(_ sobject: String, id: String) async throws -> JSONObject {
+        let json = try await get("\(dataPath)/sobjects/\(Self.pathEncoded(sobject))/\(Self.pathEncoded(id))")
+        guard let object = json.object else {
+            throw SalesforceError(statusCode: 200, errorCode: "", message: "Unexpected response for record \(id)")
+        }
+        return object
+    }
+
     func update(_ sobject: String, id: String, fields: JSONObject) async throws {
         _ = try await send("PATCH", "\(dataPath)/sobjects/\(Self.pathEncoded(sobject))/\(Self.pathEncoded(id))", body: .object(fields))
     }

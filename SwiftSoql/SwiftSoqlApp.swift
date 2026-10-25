@@ -156,6 +156,12 @@ struct QueryCommands: Commands {
 
             Divider()
 
+            Button("New Record…") {
+                model?.newRecord()
+            }
+            .keyboardShortcut("n", modifiers: [.control, .command])
+            .disabled(model?.isConnected != true || model?.workspace != .query || model?.currentTab.api != .data || model?.isSaving == true)
+
             Button("Restore Checked Rows") {
                 Task { await model?.restoreCheckedRows() }
             }

@@ -6,6 +6,8 @@ nonisolated struct GlobalSObject: Sendable, Identifiable, Hashable {
     let label: String
     let custom: Bool
     let queryable: Bool
+    /// Whether the user can create records of this type.
+    let createable: Bool
     /// The first three characters of this SObject's record Ids, if it has records.
     let keyPrefix: String?
 
@@ -16,6 +18,7 @@ nonisolated struct GlobalSObject: Sendable, Identifiable, Hashable {
         label = json["label"]?.string ?? ""
         custom = json["custom"]?.bool ?? false
         queryable = json["queryable"]?.bool ?? false
+        createable = json["createable"]?.bool ?? false
         keyPrefix = json["keyPrefix"]?.string
     }
 }
@@ -97,6 +100,13 @@ nonisolated struct FieldDescribe: Sendable, Identifiable {
     var aggregatable: Bool { json["aggregatable"]?.bool ?? false }
     var groupable: Bool { json["groupable"]?.bool ?? false }
     var updateable: Bool { json["updateable"]?.bool ?? false }
+    var createable: Bool { json["createable"]?.bool ?? false }
+    /// Whether Salesforce fills in the field when a record is created without it.
+    var defaultedOnCreate: Bool { json["defaultedOnCreate"]?.bool ?? false }
+    var unique: Bool { json["unique"]?.bool ?? false }
+    /// Whether a new record needs a value for the field. Checkboxes are never empty, so they
+    /// don't count.
+    var isRequiredOnCreate: Bool { createable && !nillable && !defaultedOnCreate && type != "boolean" }
     var nillable: Bool { json["nillable"]?.bool ?? false }
     var nameField: Bool { json["nameField"]?.bool ?? false }
     var externalId: Bool { json["externalId"]?.bool ?? false }

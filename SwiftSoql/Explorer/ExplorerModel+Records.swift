@@ -125,3 +125,64 @@ extension ExplorerModel {
         await refreshAPIUsage()
     }
 }
+
+// MARK: - Creating records
+
+extension ExplorerModel {
+    /// Data API SObjects the user can create, for the new record form.
+    var createableSObjects: [String] {
+        dataSchema.sobjects.filter(\.createable).map(\.name)
+    }
+
+    /// Opens the form for a new record of the results' SObject, or the query's, if there is one.
+    func newRecord() {
+        let tab = currentTab
+        var sobject = ""
+        if let results = tab.results, results.api == .data, results.sobjectTypes.count == 1, let type = results.sobjectTypes.first {
+            sobject = type
+        } else if tab.api == .data, let type = dataSchema.sobjects.first(where: { $0.name.caseInsensitiveCompare(tab.title) == .orderedSame }) {
+            sobject = type.name
+        }
+        recordDraft = RecordDraft(sobject: createableSObjects.contains(sobject) ? sobject : "")
+    }
+
+    /// Opens the form for a copy of a row's record, with every field a new record can set.
+    func cloneRecord(_ row: ResultRow) async {
+        guard let client, let id = row.recordID, let type = row.record.sobjectType else { return }
+        currentTab.statusText = "Reading \(id)…"
+        do {
+            let describe = try await dataSchema.describe(type)
+            let record = try await client.record(type, id: id)
+            currentTab.statusText = ""
+            recordDraft = RecordDraft(cloning: record, id: id, describe: describe)
+        } catch {
+            currentTab.statusText = ""
+            self.error = DisplayedError("Unable to clone \(id)", error)
+        }
+        await refreshAPIUsage()
+    }
+
+    /// Creates the draft's record and, when the current tab's results are of the same SObject,
+    /// adds it as their first row. Throws if it can't be created, so the form can show why.
+    func createRecord(_ draft: RecordDraft) async throws {
+        guard let client else { return }
+        let tab = currentTab
+        isSaving = true
+        defer { isSaving = false }
+        defer { Task { await refreshAPIUsage() } }
+        let describe = try await dataSchema.describe(draft.sobject)
+        let id = try await client.create(describe.name, fields: draft.fieldValues(describe))
+        tab.statusText = "Created \(describe.name) \(id)"
+        guard let results = tab.results, results.api == .data, !results.isSearchResult,
+              results.sobjectTypes == [describe.name] else { return }
+        // Read it back with the results' columns, leaving out subqueries.
+        let subqueries = Set(describe.childRelationships.compactMap { $0.relationshipName?.lowercased() })
+        let columns = results.columns.filter { !subqueries.contains($0.lowercased()) }
+        guard !columns.isEmpty,
+              let record = try? await client.query("SELECT \(columns.joined(separator: ", ")) FROM \(describe.name) WHERE Id = '\(id)'").records.first else {
+            tab.statusText += "; run the query again to see it"
+            return
+        }
+        tab.results?.insertFirst(record)
+    }
+}

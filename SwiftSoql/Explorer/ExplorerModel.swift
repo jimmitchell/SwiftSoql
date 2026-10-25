@@ -96,6 +96,8 @@ final class ExplorerModel {
     var isSaving = false
     /// Set to ask the user to confirm deleting the checked rows.
     var isConfirmingDelete = false
+    /// A record being created, while its form shows.
+    var recordDraft: RecordDraft?
     /// The queries run and pinned in this org.
     let history = QueryHistory()
     /// The fields picked by double-clicking in the schema sidebar, for building a query.

@@ -80,6 +80,12 @@ struct ResultsTable: View {
                 .disabled(sortOrder.wrappedValue.isEmpty)
             Divider()
             openInSalesforceItems(ids)
+            if resultSet.isEditable, ids.count == 1, let row = resultSet.rows.first(where: { ids.contains($0.id) }), row.recordID != nil {
+                Button("Clone Record…") {
+                    Task { await model.cloneRecord(row) }
+                }
+                .disabled(model.isSaving)
+            }
             if let checkedRows {
                 Divider()
                 Button(resultSet.includesDeleted ? "Check Rows" : "Check Rows for Deletion") { checkedRows.wrappedValue.formUnion(ids) }
@@ -91,6 +97,9 @@ struct ResultsTable: View {
                 Button("Uncheck All Rows") { checkedRows.wrappedValue = [] }
                     .disabled(checkedRows.wrappedValue.isEmpty)
             }
+        }
+        .onChange(of: resultSet.highlightedRowID, initial: true) { _, id in
+            if let id { selection = [id] }
         }
         .onCopyCommand {
             let text = ResultsExport.tabSeparated(resultSet, rowIDs: selection, includeHeader: false)

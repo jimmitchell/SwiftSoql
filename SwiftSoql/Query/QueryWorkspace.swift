@@ -83,6 +83,9 @@ struct QueryWorkspace: View {
         .sheet(item: $model.queryPlan) { plan in
             QueryPlanView(result: plan)
         }
+        .sheet(item: $model.recordDraft) { draft in
+            RecordForm(model: model, draft: draft)
+        }
         .confirmationDialog(deleteConfirmationTitle, isPresented: $model.isConfirmingDelete) {
             Button("Delete", role: .destructive) {
                 Task { await model.deleteCheckedRows() }
@@ -108,6 +111,15 @@ struct QueryWorkspace: View {
                 }
                 .disabled(results.checkedRows.isEmpty || model.isSaving)
                 .help("Restore the checked rows' records from the Recycle Bin")
+            }
+            if model.currentTab.api == .data {
+                Button {
+                    model.newRecord()
+                } label: {
+                    Label("New Record", systemImage: "plus")
+                }
+                .disabled(model.isSaving)
+                .help("Create a record (⌃⌘N)")
             }
             if let results = model.results, results.isEditable {
                 Button("Delete Checked") {

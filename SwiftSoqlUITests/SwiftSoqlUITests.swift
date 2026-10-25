@@ -224,6 +224,52 @@ final class SwiftSoqlUITests: XCTestCase {
         XCTAssertTrue(waitForStatus("Deleted 1 row"), "The Task should be deleted")
     }
 
+    /// Creates an Account with the new record form, clones it from the results, and deletes both.
+    @MainActor
+    func testCreateAndCloneRecord() throws {
+        try XCTSkipIf(testOrg == nil, "Set SWIFTSOQL_TEST_ORG to run this test")
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["SWIFTSOQL_TEST_WRITES"] == "YES", "Set SWIFTSOQL_TEST_WRITES=YES to let this test create and delete records")
+        try launch()
+        let name = "SwiftSoql UI test \(UUID().uuidString.prefix(8))"
+        setQuery("SELECT Id, Name FROM Account WHERE Name LIKE '\(name)%' ORDER BY Name")
+
+        // The form starts on the query's SObject and needs its required Name.
+        app.typeKey("n", modifierFlags: [.control, .command])
+        let nameField = app.textFields["field.Name"]
+        XCTAssertTrue(nameField.waitForExistence(timeout: 30), "The form should list Account's fields")
+        XCTAssertFalse(app.buttons["Create"].isEnabled, "Name is required")
+        nameField.click()
+        nameField.typeText(name)
+        app.buttons["Create"].click()
+        XCTAssertTrue(waitForStatus("Created Account"), "The record should be created")
+
+        runQuery()
+        XCTAssertTrue(waitForStatus("Loaded 1 of 1"), "The new Account should be found")
+        // Right-click the read-only Id cell; an editable cell shows its text field's menu.
+        let idCell = { self.results.outlineRows.element(boundBy: 0).coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)) }
+        idCell().rightClick()
+        app.menuItems["Clone Record…"].click()
+        XCTAssertTrue(nameField.waitForExistence(timeout: 30), "Cloning opens the form")
+        XCTAssertEqual(nameField.value as? String, name, "The copy starts with the record's values")
+        nameField.click()
+        nameField.typeKey(.rightArrow, modifierFlags: .command)
+        nameField.typeText(" copy")
+        app.buttons["Create"].click()
+        XCTAssertTrue(waitForStatus("Created Account"), "The copy should be created")
+        // Name is editable, so its cells are text fields.
+        let copyCell = results.textFields.matching(NSPredicate(format: "value == %@", "\(name) copy")).firstMatch
+        XCTAssertTrue(copyCell.waitForExistence(timeout: 10), "The copy is added to the results")
+        XCTAssertEqual(results.outlineRows.count, 2)
+
+        idCell().rightClick()
+        app.menuItems["Check All Rows"].click()
+        app.buttons["Delete Checked"].click()
+        let confirm = app.buttons.matching(NSPredicate(format: "label == 'Delete'")).firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.click()
+        XCTAssertTrue(waitForStatus("Deleted 2 rows"), "Both Accounts should be deleted")
+    }
+
     @MainActor
     func testSchemaDiagramMovesToARelatedSObject() throws {
         try XCTSkipIf(testOrg == nil, "Set SWIFTSOQL_TEST_ORG to run this test")

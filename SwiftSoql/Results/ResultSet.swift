@@ -32,6 +32,8 @@ struct ResultSet: Identifiable {
     var checkedRows: Set<ResultRow.ID> = []
     /// Why rows couldn't be deleted.
     var rowErrors: [ResultRow.ID: String] = [:]
+    /// A row to select, such as a record just created.
+    var highlightedRowID: ResultRow.ID?
 
     private var nextRowID = 0
 
@@ -86,6 +88,18 @@ struct ResultSet: Identifiable {
     mutating func sort(by order: [ResultSortComparator]) {
         sortOrder = order
         rows = ResultSortComparator.sorted(rows, by: order)
+    }
+
+    /// Adds a record, such as one just created, as the first row and highlights it.
+    mutating func insertFirst(_ record: JSONObject) {
+        let row = ResultRow(id: nextRowID, record: record)
+        nextRowID += 1
+        rows.insert(row, at: 0)
+        totalSize += 1
+        if let type = record.sobjectType {
+            sobjectTypes.insert(type)
+        }
+        highlightedRowID = row.id
     }
 
     /// Removes deleted rows.
