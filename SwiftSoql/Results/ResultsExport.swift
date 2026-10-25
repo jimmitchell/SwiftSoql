@@ -32,7 +32,7 @@ enum ResultsExport {
 
     /// Text that a spreadsheet would treat as a formula gets a leading apostrophe; numbers,
     /// including negative ones, are left alone.
-    static func neutralized(_ value: String) -> String {
+    nonisolated static func neutralized(_ value: String) -> String {
         guard let first = value.unicodeScalars.first, "=+-@\t\r".unicodeScalars.contains(first), Double(value) == nil else { return value }
         return "'" + value
     }
@@ -49,7 +49,7 @@ enum ResultsExport {
         "  " + trimmed(.object(record)).prettyPrinted(indent: "  ")
     }
 
-    private static func trimmed(_ value: JSONValue) -> JSONValue {
+    nonisolated private static func trimmed(_ value: JSONValue) -> JSONValue {
         switch value {
         case .object(let o):
             var out = JSONObject()
