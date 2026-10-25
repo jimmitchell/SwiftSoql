@@ -1,1 +1,4 @@
 build/
+
+# Personal Claude Code settings
+.claude/settings.local.json
