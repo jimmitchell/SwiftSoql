@@ -11,7 +11,7 @@ struct DataDictionaryTests {
           {"name": "OwnerId", "label": "Owner ID", "type": "reference", "referenceTo": ["User"], "createable": true, "nillable": false, "defaultedOnCreate": true},
           {"name": "Tier__c", "label": "Tier", "type": "picklist", "length": 255, "custom": true, "nillable": true,
            "picklistValues": [{"value": "Gold", "active": true}, {"value": "Old", "active": false}, {"value": "Silver", "active": true}]},
-          {"name": "Score__c", "label": "Score", "type": "double", "precision": 5, "scale": 2, "custom": true, "calculatedFormula": "1 +\n2"}
+          {"name": "Score__c", "label": "Score", "type": "double", "precision": 5, "scale": 2, "custom": true, "calculatedFormula": "1 +\n2", "inlineHelpText": "=HYPERLINK(\"http://example.com\")"}
         ]}
         """#
         return SObjectDescribe(json: try #require(try JSONValue.parse(Data(json.utf8)).object))
@@ -30,6 +30,7 @@ struct DataDictionaryTests {
         #expect(rows[1] == ["Account", "Name", "Account Name", "string(255)", "Yes", "", "", "", "", "", ""])
         #expect(rows[4][9] == "Gold; Silver", "Only active picklist values")
         #expect(rows[5][10] == "1 +\n2")
+        #expect(rows[5][8] == "'=HYPERLINK(\"http://example.com\")", "Text a spreadsheet would run as a formula is neutralized")
     }
 
     @Test func markdownEscapesCells() throws {

@@ -16,8 +16,10 @@ nonisolated enum DataDictionary {
     static func text(_ describes: [SObjectDescribe], format: Format) -> String {
         switch format {
         case .csv:
+            // Help text, picklist values and formulas come from the org, so text a spreadsheet
+            // would run as a formula gets a leading apostrophe.
             CSV.line(columns) + describes.flatMap { describe in
-                describe.fields.map { CSV.line(values(describe, $0)) }
+                describe.fields.map { CSV.line(values(describe, $0).map(ResultsExport.neutralized)) }
             }.joined()
         case .markdown:
             describes.map(markdown).joined(separator: "\n")

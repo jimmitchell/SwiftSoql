@@ -32,7 +32,7 @@ enum ResultsExport {
 
     /// Text that a spreadsheet would treat as a formula gets a leading apostrophe; numbers,
     /// including negative ones, are left alone.
-    private static func neutralized(_ value: String) -> String {
+    static func neutralized(_ value: String) -> String {
         guard let first = value.unicodeScalars.first, "=+-@\t\r".unicodeScalars.contains(first), Double(value) == nil else { return value }
         return "'" + value
     }
