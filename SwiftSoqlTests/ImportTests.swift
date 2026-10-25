@@ -70,6 +70,17 @@ struct ImportTests {
         #expect(throws: InvalidFieldValue.self) { try plan.record(["", "Acme"]) }
     }
 
+    @Test func idsMustBeSingleIdsOfTheChosenSObject() throws {
+        let json = #"{"name": "Account", "keyPrefix": "001", "fields": [{"name": "Id", "type": "id"}]}"#
+        let d = SObjectDescribe(json: try #require(try JSONValue.parse(Data(json.utf8)).object))
+        let plan = ImportPlan(describe: d, operation: .delete, mapping: ImportMapping(fields: ["Id"]))
+        #expect(try plan.record(["001000000000001AAA"])["Id"] == .string("001000000000001AAA"))
+        #expect(try plan.record(["001000000000001"]).keys == ["Id"], "15-character Ids are fine")
+        #expect(throws: InvalidFieldValue.self, "A Contact's Id can't delete through an Account import") { try plan.record(["003000000000001AAA"]) }
+        #expect(throws: InvalidFieldValue.self, "Two Ids in one cell can't delete two records") { try plan.record(["001000000000001AAA,001000000000002AAA"]) }
+        #expect(throws: InvalidFieldValue.self) { try plan.uploadValues(["not-an-id"]) }
+    }
+
     @Test func rowsBecomeRecordsAndUploads() throws {
         let d = try describe()
         var plan = ImportPlan(describe: d, operation: .update, mapping: ImportMapping(fields: ["Id", "Name", "NumberOfEmployees", nil]))

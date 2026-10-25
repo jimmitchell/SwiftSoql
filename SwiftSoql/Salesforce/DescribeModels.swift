@@ -73,6 +73,9 @@ nonisolated struct SObjectDescribe: Sendable {
         return out
     }
 
+    /// The first three characters of this SObject's record Ids, if it has records.
+    var keyPrefix: String? { json["keyPrefix"]?.string }
+
     func field(named name: String) -> FieldDescribe? {
         fields.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }
     }

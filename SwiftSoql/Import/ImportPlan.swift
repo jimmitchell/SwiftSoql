@@ -149,9 +149,24 @@ nonisolated struct ImportPlan: Sendable {
                 if clearEmpty { record[field.name] = .null }
                 continue
             }
+            if field.name == "Id" {
+                try checkID(text)
+            }
             record[field.name] = try field.value(fromText: text)
         }
         return record
+    }
+
+    /// An Id in the file must be a single record Id of the chosen SObject, so a row can't
+    /// change or delete records of another type, or several records at once.
+    private func checkID(_ text: String) throws {
+        let id = text.trimmingCharacters(in: .whitespaces)
+        guard id.count == 15 || id.count == 18, id.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber) }) else {
+            throw InvalidFieldValue(errorDescription: "\(text) isn't a record Id.")
+        }
+        if let prefix = describe.keyPrefix, !id.hasPrefix(prefix) {
+            throw InvalidFieldValue(errorDescription: "\(id) isn't the Id of a \(describe.name) record.")
+        }
     }
 
     /// The mapped columns' field names, the header of a Bulk API upload.
