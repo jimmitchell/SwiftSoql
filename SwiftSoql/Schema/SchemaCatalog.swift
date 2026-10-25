@@ -98,6 +98,29 @@ final class SchemaCatalog {
         return result
     }
 
+    /// Describes several SObjects, fetching the ones not yet cached 25 to a request. Returns them
+    /// in the order asked for; `progress` gets how many are done.
+    func describe(_ names: [String], progress: (Int) -> Void = { _ in }) async throws -> [SObjectDescribe] {
+        guard let client else { throw CancellationError() }
+        let missing = names.filter { describes[$0.lowercased()] == nil }
+        progress(names.count - missing.count)
+        for start in stride(from: 0, to: missing.count, by: SalesforceClient.describeBatchLimit) {
+            try Task.checkCancellation()
+            let batch = Array(missing[start..<min(start + SalesforceClient.describeBatchLimit, missing.count)])
+            let result = try await client.describe(batch: batch, api: api)
+            for describe in result.describes {
+                describes[describe.name.lowercased()] = describe
+            }
+            // One that the batch couldn't describe gets a request of its own, which reports why.
+            for name in result.failed {
+                try await describe(name)
+            }
+            progress(names.count - missing.count + start + batch.count)
+        }
+        await didCallAPI()
+        return names.compactMap { describes[$0.lowercased()] }
+    }
+
     /// Describes every SObject, a few batches at a time, so the sidebar filter can find fields in
     /// all of them. SoqlXplorer does the same. Describes the UI asks for go ahead separately.
     private func describeAll(using client: SalesforceClient) async {

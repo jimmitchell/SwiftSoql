@@ -81,6 +81,11 @@ struct FileCommands: Commands {
             }
             .keyboardShortcut("i", modifiers: [.command, .shift])
             .disabled(model?.canChangeData != true || model?.csvImport != nil)
+
+            Button("Export Data Dictionary…") {
+                model?.isExportingDictionary = true
+            }
+            .disabled(model?.isConnected != true)
         }
         CommandGroup(replacing: .saveItem) {
             Button(model?.workspace == .apex ? "Save Apex…" : "Save Query…") {

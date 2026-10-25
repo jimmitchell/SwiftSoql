@@ -252,6 +252,14 @@ final class ExplorerModel {
 
     /// Set to show the org's limits.
     var isShowingLimits = false
+    /// Set to show the data dictionary export sheet.
+    var isExportingDictionary = false
+
+    /// Writes a data dictionary of data API SObjects to a file.
+    func exportDataDictionary(_ names: [String], format: DataDictionary.Format, to url: URL, progress: (Int) -> Void = { _ in }) async throws {
+        let describes = try await dataSchema.describe(names, progress: progress)
+        try Data(DataDictionary.text(describes, format: format).utf8).write(to: url)
+    }
 
     func orgLimits() async throws -> [OrgLimit] {
         guard let client else { throw CancellationError() }

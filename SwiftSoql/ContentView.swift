@@ -78,6 +78,9 @@ struct ExplorerView: View {
         .sheet(isPresented: $model.isShowingLimits) {
             OrgLimitsView(model: model)
         }
+        .sheet(isPresented: $model.isExportingDictionary) {
+            DataDictionarySheet(model: model)
+        }
         .inspector(isPresented: $showInspector) {
             InspectorPanel(model: model)
                 .inspectorColumnWidth(min: 240, ideal: 300, max: 500)

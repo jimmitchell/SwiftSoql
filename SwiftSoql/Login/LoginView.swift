@@ -111,7 +111,8 @@ struct LoginView: View {
     /// and `-query <soql>` then runs a query, `-executeApex <code>` runs anonymous Apex, `-explainQuery <soql>` shows a query plan, `-formatQuery YES`
     /// formats the query, and
     /// `-showSchema <sobject>` shows its schema diagram, and `-importCSV <path>` opens the import
-    /// sheet for a file.
+    /// sheet for a file. `-exportDataDictionary <path>` writes the data dictionary of the
+    /// SObjects in `-dictionarySObjects A,B`, as Markdown if the path ends in .md.
     private static var launchArgumentHandled = false
 
     private func connectFromLaunchArgument() {
@@ -132,6 +133,15 @@ struct LoginView: View {
             if model.isConnected, let query = defaults.string(forKey: "explainQuery") {
                 model.soql = query
                 await model.explainQuery()
+            }
+            if model.isConnected, let path = defaults.string(forKey: "exportDataDictionary") {
+                let names = (defaults.string(forKey: "dictionarySObjects") ?? "").split(separator: ",").map(String.init)
+                let url = URL(filePath: path)
+                do {
+                    try await model.exportDataDictionary(names, format: url.pathExtension == "md" ? .markdown : .csv, to: url)
+                } catch {
+                    model.error = DisplayedError("Unable to export the data dictionary", error)
+                }
             }
             if model.isConnected, let path = defaults.string(forKey: "importCSV") {
                 await model.beginImport(of: URL(filePath: path))

@@ -234,6 +234,20 @@ final class SwiftSoqlUITests: XCTestCase {
     }
 
     @MainActor
+    func testExportDataDictionary() throws {
+        try XCTSkipIf(testOrg == nil, "Set SWIFTSOQL_TEST_ORG to run this test")
+        let url = FileManager.default.temporaryDirectory.appending(path: "dictionary-\(UUID().uuidString).md")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try launch(extraArguments: ["-exportDataDictionary", url.path, "-dictionarySObjects", "Account,Contact"])
+        let exists = NSPredicate { _, _ in FileManager.default.fileExists(atPath: url.path) }
+        wait(for: [XCTNSPredicateExpectation(predicate: exists, object: nil)], timeout: 60)
+        let text = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertTrue(text.hasPrefix("## Account (`Account`)"), "Account comes first")
+        XCTAssertTrue(text.contains("## Contact (`Contact`)"))
+        XCTAssertTrue(text.contains("| `LastName` | Last Name | string(80) | Yes |"), "Contact's required LastName is listed with its size")
+    }
+
+    @MainActor
     func testFormatQuery() throws {
         try XCTSkipIf(testOrg == nil, "Set SWIFTSOQL_TEST_ORG to run this test")
         try launch()

@@ -18,8 +18,11 @@ A Mac app for exploring Salesforce orgs, written in SwiftUI. It's a port of Simo
   Columns are matched to fields by name or label, and the mapping is remembered. Files of up to
   10,000 rows go 200 at a time; larger ones use a Bulk API job. Save Results writes each row
   with its Id and any error, so failed rows can be fixed and imported again.
-- **Schema:** browse every SObject and field, see their details, and explore relationships in a
-  diagram.
+- **Schema:** browse every SObject and field, see their details, explore relationships in a
+  diagram, and export a data dictionary of chosen SObjects as CSV or Markdown (File ▸ Export
+  Data Dictionary…).
+- **Org limits:** Query ▸ Org Limits… (⇧⌘L), or click the API counter, to see every limit, most
+  used first.
 - **Anonymous Apex:** run it and read the debug log, with SOQL checking and completions in the
   editor.
 
