@@ -100,3 +100,7 @@ Open `SwiftSoql.xcodeproj` in Xcode 27 and run the SwiftSoql scheme.
 
 SwiftSoql is based on SoqlXplorer and ZKParser by Simon Fell, and uses Sparkle. See
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+## License
+
+SwiftSoql is open source under the MIT license; see [LICENSE](LICENSE).
