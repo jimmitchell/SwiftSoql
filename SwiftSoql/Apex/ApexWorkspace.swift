@@ -12,55 +12,73 @@ struct ApexWorkspace: View {
         apex = model.apex
     }
 
-    var body: some View {
-        VSplitView {
-            ApexEditor(text: $apex.code, error: apex.currentError, model: model, schemaGeneration: model.dataSchema.schemaGeneration, revealLine: apex.revealLine)
-                .frame(minHeight: 80, idealHeight: 220)
+    @AppStorage("apexEditorHeight") private var editorHeight = 220.0
 
-            // An HSplitView here loops forever laying out the runs table, so the list has a fixed width.
-            HStack(spacing: 0) {
-                runsList
-                    .frame(width: 300)
-                Divider()
-                logPane
-                    .frame(minWidth: 300)
+    var body: some View {
+        // A VSplitView here kept the window from getting narrower than about 960 points, so the
+        // editor and the runs are split by a divider of our own.
+        GeometryReader { geometry in
+            let heights = 80...max(80, Double(geometry.size.height) - 160)
+            VStack(spacing: 0) {
+                ApexEditor(text: $apex.code, error: apex.currentError, model: model, schemaGeneration: model.dataSchema.schemaGeneration, revealLine: apex.revealLine)
+                    .frame(height: editorHeight.clamped(to: heights))
+                SplitDivider(height: $editorHeight, range: heights)
+                runsAndLog
             }
-            .frame(minHeight: 120, idealHeight: 450)
         }
+        // The runs list and log's minimums, which the GeometryReader doesn't pass on.
+        .frame(minWidth: 401, minHeight: 240)
         .sheet(isPresented: $apex.isManagingSnippets) {
             ApexSnippetsSheet(apex: apex)
         }
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                snippetsMenu
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    ForEach(ApexLogCategory.allCases) { category in
-                        Picker(category.label, selection: Binding {
-                            apex.logLevels[category] ?? category.defaultLevel
-                        } set: {
-                            apex.logLevels[category] = $0
-                        }) {
-                            ForEach(ApexLogLevel.allCases) { level in
-                                Text(level.rawValue).tag(level)
-                            }
+            toolbarContent
+        }
+    }
+
+    private var runsAndLog: some View {
+        // An HSplitView here loops forever laying out the runs table, so this is an HStack,
+        // with the runs list between 180 and 300 points wide.
+        HStack(spacing: 0) {
+            runsList
+                .frame(minWidth: 180, idealWidth: 260, maxWidth: 300)
+            Divider()
+            logPane
+                .frame(minWidth: 220)
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            snippetsMenu
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Menu {
+                ForEach(ApexLogCategory.allCases) { category in
+                    Picker(category.label, selection: Binding {
+                        apex.logLevels[category] ?? category.defaultLevel
+                    } set: {
+                        apex.logLevels[category] = $0
+                    }) {
+                        ForEach(ApexLogLevel.allCases) { level in
+                            Text(level.rawValue).tag(level)
                         }
                     }
-                } label: {
-                    Label("Log Levels", systemImage: "slider.horizontal.3")
                 }
-                .help("How much each part of the platform writes to the debug log")
+            } label: {
+                Label("Log Levels", systemImage: "slider.horizontal.3")
             }
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    Task { await model.executeApex() }
-                } label: {
-                    Label(apex.selectedCode == nil ? "Execute" : "Execute Selection", systemImage: "play.fill")
-                }
-                .help(model.isLocked ? "Unlock the window to run Apex in this org" : apex.selectedCode == nil ? "Execute Apex (⌘↩)" : "Execute the selected code (⌘↩)")
-                .disabled(apex.isRunning || !model.canChangeData)
+            .help("How much each part of the platform writes to the debug log")
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                Task { await model.executeApex() }
+            } label: {
+                Label(apex.selectedCode == nil ? "Execute" : "Execute Selection", systemImage: "play.fill")
             }
+            .help(model.isLocked ? "Unlock the window to run Apex in this org" : apex.selectedCode == nil ? "Execute Apex (⌘↩)" : "Execute the selected code (⌘↩)")
+            .disabled(apex.isRunning || !model.canChangeData)
         }
     }
 
@@ -94,12 +112,15 @@ struct ApexWorkspace: View {
                 } else {
                     Text(apex.runs.isEmpty ? "No runs yet" : "\(apex.runs.count) \(apex.runs.count == 1 ? "run" : "runs")")
                 }
-                Spacer()
+                Spacer(minLength: 4)
                 if let usage = model.apiUsage {
-                    Text("API \(usage)")
-                        .help("Daily API requests used / limit")
+                    Button("API \(usage)") { model.isShowingLimits = true }
+                        .buttonStyle(.plain)
+                        .lineLimit(1)
+                        .help("Daily API requests used / limit. Click to see all of the org's limits.")
                 }
             }
+            .lineLimit(1)
             .font(.callout)
             .foregroundStyle(.secondary)
             .controlSize(.small)
@@ -153,25 +174,10 @@ struct ApexWorkspace: View {
 
     private var logPane: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Picker("Show", selection: $apex.logLines) {
-                    ForEach(ApexModel.LogLines.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
-                .help("Show all log lines, or only System.debug output, queries, DML or exceptions")
-                TextField("Filter", text: $apex.logFilter)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 220)
-                Spacer()
-                if let run = apex.selectedRun {
-                    Text(ByteCountFormatter.string(fromByteCount: Int64(run.debugLog.utf8.count), countStyle: .file))
-                        .foregroundStyle(.secondary)
-                }
-                Button("Save Log…") { saveLog() }
-                    .disabled(apex.selectedRun?.debugLog.isEmpty ?? true)
-                    .help("Save the whole debug log to a file")
+            // Narrow windows get a menu instead of the segmented control, and an icon for Save Log.
+            ViewThatFits(in: .horizontal) {
+                logHeader(compact: false)
+                logHeader(compact: true)
             }
             .font(.callout)
             .controlSize(.small)
@@ -189,6 +195,49 @@ struct ApexWorkspace: View {
                         ContentUnavailableView("No Debug Log", systemImage: "doc.plaintext", description: Text(run.compiled ? "Turn up the log levels in the toolbar to see more." : "Code that doesn't compile doesn't run, so there's no log."))
                     }
                 }
+        }
+    }
+
+    private var logLinesPicker: some View {
+        Picker("Show", selection: $apex.logLines) {
+            ForEach(ApexModel.LogLines.allCases) { Text($0.rawValue).tag($0) }
+        }
+    }
+
+    private func logHeader(compact: Bool) -> some View {
+        HStack(spacing: compact ? 6 : 10) {
+            Group {
+                if compact {
+                    logLinesPicker.pickerStyle(.menu)
+                } else {
+                    logLinesPicker.pickerStyle(.segmented)
+                }
+            }
+            .labelsHidden()
+            .fixedSize()
+            .help("Show all log lines, or only System.debug output, queries, DML or exceptions")
+            TextField("Filter", text: $apex.logFilter)
+                .textFieldStyle(.roundedBorder)
+                .frame(minWidth: 70, maxWidth: 220)
+            Spacer(minLength: 0)
+            if !compact, let run = apex.selectedRun {
+                Text(ByteCountFormatter.string(fromByteCount: Int64(run.debugLog.utf8.count), countStyle: .file))
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+            }
+            Button {
+                saveLog()
+            } label: {
+                if compact {
+                    Image(systemName: "square.and.arrow.down")
+                } else {
+                    Text("Save Log…")
+                }
+            }
+            .fixedSize()
+            .disabled(apex.selectedRun?.debugLog.isEmpty ?? true)
+            .help("Save the whole debug log to a file")
+            .accessibilityLabel("Save Log")
         }
     }
 

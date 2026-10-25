@@ -395,6 +395,8 @@ final class SwiftSoqlUITests: XCTestCase {
         app.buttons["Create"].click()
         XCTAssertTrue(waitForStatus("Created Account"), "The record should be created")
 
+        // Close the completion popup, which can cover the results.
+        editor.typeKey(.escape, modifierFlags: [])
         runQuery()
         XCTAssertTrue(waitForStatus("Loaded 1 of 1"), "The new Account should be found")
         // Right-click the read-only Id cell; an editable cell shows its text field's menu.

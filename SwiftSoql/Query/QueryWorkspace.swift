@@ -11,50 +11,43 @@ struct QueryWorkspace: View {
     @State private var isConfirmingExport = false
     @AppStorage("showResultsAsJSON") private var showJSON = false
 
+    @AppStorage("queryEditorHeight") private var editorHeight = 170.0
+    @AppStorage("childResultsHeight") private var childHeight = 220.0
+
     var body: some View {
-        VSplitView {
+        // VSplitView kept the window from getting narrow, so the panes are split by dividers of
+        // our own: the editor's height, the results taking the rest, and any subquery rows below.
+        GeometryReader { geometry in
+            let total = Double(geometry.size.height)
+            let childSpace = model.childResults == nil ? 0.0 : 107
+            let editorHeights = 90...max(90, total - 127 - childSpace)
+            let editor = editorHeight.clamped(to: editorHeights)
             VStack(spacing: 0) {
-                QueryTabBar(model: model)
-                Divider()
-                SOQLEditor(text: $model.soql, describer: model.schema, schemaGeneration: model.schema.schemaGeneration)
-                    // Each tab gets its own editor, so undo stays within the tab.
-                    .id(model.selectedTabID)
-            }
-            .frame(minHeight: 90, idealHeight: 170)
-
-            VStack(spacing: 0) {
-                resultsHeader
-                Divider()
-                results
-            }
-            .frame(minHeight: 120, idealHeight: 500)
-
-            if let child = model.childResults {
                 VStack(spacing: 0) {
-                    HStack {
-                        Text("\(child.title ?? "Child rows") — \(child.rows.count) of \(child.totalSize) rows")
-                            .font(.callout.weight(.medium))
-                        Spacer()
-                        Button {
-                            model.childResults = nil
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                        }
-                        .buttonStyle(.borderless)
-                        .help("Close")
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
+                    QueryTabBar(model: model)
                     Divider()
-                    ResultsTable(resultSet: child, model: model, sortOrder: Binding {
-                        model.childResults?.sortOrder ?? []
-                    } set: {
-                        model.childResults?.sort(by: $0)
-                    }, accessibilityID: "childResults")
+                    SOQLEditor(text: $model.soql, describer: model.schema, schemaGeneration: model.schema.schemaGeneration)
+                        // Each tab gets its own editor, so undo stays within the tab.
+                        .id(model.selectedTabID)
                 }
-                .frame(minHeight: 100, idealHeight: 220)
+                .frame(height: editor)
+                SplitDivider(height: $editorHeight, range: editorHeights)
+
+                VStack(spacing: 0) {
+                    resultsHeader
+                    Divider()
+                    results
+                }
+
+                if let child = model.childResults {
+                    let childHeights = 100...max(100, total - editor - 134)
+                    SplitDivider(height: $childHeight, range: childHeights, resizesPaneBelow: true)
+                    childPane(child)
+                        .frame(height: childHeight.clamped(to: childHeights))
+                }
             }
         }
+        .frame(minWidth: 420, minHeight: 240)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -97,6 +90,31 @@ struct QueryWorkspace: View {
         } message: {
             Text((model.isGuarded ? "This is a \(model.orgKind?.title.lowercased() ?? "production") org. " : "")
                 + "Salesforce moves most deleted records to the Recycle Bin, where they can be restored.")
+        }
+    }
+
+    private func childPane(_ child: ResultSet) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("\(child.title ?? "Child rows") — \(child.rows.count) of \(child.totalSize) rows")
+                    .font(.callout.weight(.medium))
+                Spacer()
+                Button {
+                    model.childResults = nil
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(.borderless)
+                .help("Close")
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            Divider()
+            ResultsTable(resultSet: child, model: model, sortOrder: Binding {
+                model.childResults?.sortOrder ?? []
+            } set: {
+                model.childResults?.sort(by: $0)
+            }, accessibilityID: "childResults")
         }
     }
 

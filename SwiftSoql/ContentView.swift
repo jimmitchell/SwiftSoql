@@ -64,6 +64,10 @@ struct ExplorerView: View {
                     UnlockedBanner(model: model)
                 }
             }
+            .inspector(isPresented: $showInspector) {
+                InspectorPanel(model: model)
+                    .inspectorColumnWidth(min: 240, ideal: 300, max: 500)
+            }
         }
         .focusedSceneValue(\.explorerModel, model)
         // The Tooling API's SObjects load when a Tooling API tab first shows.
@@ -80,10 +84,6 @@ struct ExplorerView: View {
         }
         .sheet(isPresented: $model.isExportingDictionary) {
             DataDictionarySheet(model: model)
-        }
-        .inspector(isPresented: $showInspector) {
-            InspectorPanel(model: model)
-                .inspectorColumnWidth(min: 240, ideal: 300, max: 500)
         }
         .toolbar {
             ToolbarItem(placement: .navigation) {
