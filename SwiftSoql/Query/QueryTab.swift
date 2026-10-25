@@ -6,14 +6,17 @@ import Observation
 final class QueryTab: Identifiable {
     let id = UUID()
     var soql: String
+    /// The API the tab's queries go to.
+    var api: SalesforceAPI
     var results: ResultSet?
     /// A subquery result opened from a cell of `results`.
     var childResults: ResultSet?
     var isQuerying = false
     var statusText = ""
 
-    init(soql: String) {
+    init(soql: String, api: SalesforceAPI = .data) {
         self.soql = soql
+        self.api = api
     }
 
     /// A short name for the tab: the SObject the query is FROM (not a subquery's), "Search" for

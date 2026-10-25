@@ -59,6 +59,10 @@ struct ExplorerView: View {
             }
         }
         .focusedSceneValue(\.explorerModel, model)
+        // The Tooling API's SObjects load when a Tooling API tab first shows.
+        .task(id: model.schemaAPI) {
+            await model.loadSchemaIfNeeded()
+        }
         .background(ToolbarDisplayModeKeeper())
         .modifier(CodeFileHandling(model: model))
         .inspector(isPresented: $showInspector) {

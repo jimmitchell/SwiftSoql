@@ -14,7 +14,7 @@ struct ApexWorkspace: View {
 
     var body: some View {
         VSplitView {
-            ApexEditor(text: $apex.code, error: apex.currentError, model: model, schemaGeneration: model.schemaGeneration, revealLine: apex.revealLine)
+            ApexEditor(text: $apex.code, error: apex.currentError, model: model, schemaGeneration: model.dataSchema.schemaGeneration, revealLine: apex.revealLine)
                 .frame(minHeight: 80, idealHeight: 220)
 
             // An HSplitView here loops forever laying out the runs table, so the list has a fixed width.

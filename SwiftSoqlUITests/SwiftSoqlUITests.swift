@@ -126,6 +126,25 @@ final class SwiftSoqlUITests: XCTestCase {
     }
 
     @MainActor
+    func testToolingAPITab() throws {
+        try XCTSkipIf(testOrg == nil, "Set SWIFTSOQL_TEST_ORG to run this test")
+        try launch()
+        app.typeKey("t", modifierFlags: .command)
+        app.descendants(matching: .any)["toolingAPIToggle"].firstMatch.click()
+        // The sidebar switches to the Tooling API's SObjects, which include ApexClass but not Account.
+        let sidebar = app.outlines["schemaSidebar"]
+        XCTAssertTrue(text("ApexClass", in: sidebar).waitForExistence(timeout: 30), "The sidebar should list Tooling API SObjects")
+        XCTAssertFalse(text("Account", in: sidebar).exists)
+        setQuery("SELECT Id, Name FROM ApexClass ORDER BY Name LIMIT 5")
+        runQuery()
+        XCTAssertTrue(waitForStatus("Loaded"), "The Tooling API query should load rows")
+        XCTAssertFalse(results.checkBoxes.firstMatch.exists, "Tooling API results are read-only")
+        // Back on the data API, the sidebar lists Account again.
+        app.descendants(matching: .any)["toolingAPIToggle"].firstMatch.click()
+        XCTAssertTrue(text("Account", in: sidebar).waitForExistence(timeout: 10))
+    }
+
+    @MainActor
     func testFormatQuery() throws {
         try XCTSkipIf(testOrg == nil, "Set SWIFTSOQL_TEST_ORG to run this test")
         try launch()

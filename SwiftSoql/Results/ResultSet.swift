@@ -10,6 +10,8 @@ struct ResultSet: Identifiable {
     /// The URL of the next batch of rows, if there is one.
     private(set) var nextRecordsURL: String?
     let isSearchResult: Bool
+    /// The API the query went to.
+    let api: SalesforceAPI
     /// The SObject types of the rows.
     private(set) var sobjectTypes: Set<String>
     /// For subquery results, the column they came from.
@@ -33,7 +35,8 @@ struct ResultSet: Identifiable {
 
     private var nextRowID = 0
 
-    init(result: QueryResult, title: String? = nil, parentRowID: ResultRow.ID? = nil) {
+    init(result: QueryResult, api: SalesforceAPI = .data, title: String? = nil, parentRowID: ResultRow.ID? = nil) {
+        self.api = api
         self.title = title
         self.parentRowID = parentRowID
         totalSize = result.totalSize
@@ -45,8 +48,9 @@ struct ResultSet: Identifiable {
         add(result.records)
     }
 
-    /// Whether the rows can be edited and deleted, which needs their Ids. The same rule as SoqlXplorer.
-    var isEditable: Bool { columns.contains("Id") }
+    /// Whether the rows can be edited and deleted, which needs their Ids (the same rule as
+    /// SoqlXplorer). Tooling API results are read-only.
+    var isEditable: Bool { api == .data && columns.contains("Id") }
 
     /// A starting width for a column that fits its name and the values in the first rows.
     func idealWidth(for column: String) -> CGFloat {

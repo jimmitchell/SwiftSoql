@@ -20,7 +20,7 @@ extension ExplorerModel {
     /// update, once the row's SObject type has been described.
     func editableField(_ column: String, of row: ResultRow) -> FieldDescribe? {
         guard column != "Id", row.recordID != nil, let type = row.record.sobjectType,
-              let field = cachedDescribe(type)?.field(exactly: column), field.updateable else { return nil }
+              let field = dataSchema.cachedDescribe(type)?.field(exactly: column), field.updateable else { return nil }
         return field
     }
 
@@ -35,7 +35,7 @@ extension ExplorerModel {
         defer { isSaving = false }
         tab.statusText = "Updating \(field) on \(id)…"
         do {
-            guard let fieldDescribe = try await describe(type).field(named: field) else {
+            guard let fieldDescribe = try await dataSchema.describe(type).field(named: field) else {
                 throw InvalidFieldValue(errorDescription: "\(type) has no field named \(field).")
             }
             let value = try fieldDescribe.value(fromText: text)

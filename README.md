@@ -4,7 +4,7 @@ A Mac app for exploring Salesforce orgs, written in SwiftUI. It's a port of Simo
 [SoqlXplorer](https://github.com/superfell/SoqlX), with some additions.
 
 - **Queries:** SOQL and SOSL with syntax coloring, error checking against your org's schema, and
-  completions; tabs; query plans; formatting; recent and pinned queries.
+  completions; tabs, each on the data API or the Tooling API (⌃⌘T); query plans; formatting; recent and pinned queries.
 - **Results:** sort, edit in place (checkboxes, picklist menus, date pickers), delete and restore
   records, open them in Salesforce, and export to CSV (large exports use the Bulk API).
 - **Schema:** browse every SObject and field, see their details, and explore relationships in a

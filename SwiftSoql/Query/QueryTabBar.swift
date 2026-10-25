@@ -15,7 +15,7 @@ struct QueryTabBar: View {
                             model.closeTab(tab.id)
                         }
                         .contextMenu {
-                            Button("Duplicate Tab") { model.newTab(soql: tab.soql) }
+                            Button("Duplicate Tab") { model.newTab(soql: tab.soql, api: tab.api) }
                             Divider()
                             Button("Close Tab") { model.closeTab(tab.id) }
                             Button("Close Other Tabs") { model.closeOtherTabs(than: tab.id) }
@@ -25,6 +25,14 @@ struct QueryTabBar: View {
                 }
                 .padding(.horizontal, 6)
             }
+            Toggle(isOn: Binding { model.currentTab.api == .tooling } set: { _ in model.toggleTabAPI() }) {
+                Label("Tooling API", systemImage: "wrench.and.screwdriver")
+                    .labelStyle(.iconOnly)
+            }
+            .toggleStyle(.button)
+            .buttonStyle(.borderless)
+            .help(model.currentTab.api == .tooling ? "This tab queries the Tooling API (⌃⌘T)" : "Query the Tooling API in this tab (⌃⌘T)")
+            .accessibilityIdentifier("toolingAPIToggle")
             Button {
                 model.newTab()
             } label: {
@@ -51,6 +59,12 @@ private struct TabButton: View {
         HStack(spacing: 4) {
             if tab.isQuerying {
                 ProgressView().controlSize(.mini)
+            }
+            if tab.api == .tooling {
+                Image(systemName: "wrench.and.screwdriver")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.orange)
+                    .accessibilityLabel("Tooling API")
             }
             Text(tab.title)
                 .lineLimit(1)

@@ -39,21 +39,31 @@ enum Workspace: String, CaseIterable, Identifiable {
 final class ExplorerModel {
     private(set) var client: SalesforceClient?
     private(set) var session: OrgSession?
-    private(set) var sobjects: [GlobalSObject] = []
     private(set) var isConnecting = false
     var statusText = ""
     var apiUsage: String?
     var error: DisplayedError?
 
     // Schema browser
+    /// The data API's SObjects, which Apex and data API query tabs use.
+    let dataSchema = SchemaCatalog(api: .data)
+    /// The Tooling API's SObjects, loaded when a Tooling API tab first needs them.
+    let toolingSchema = SchemaCatalog(api: .tooling)
     var schemaFilter = ""
-    var schemaSelection: SchemaItem?
-    var expandedSObjects: Set<String> = []
-    private var describes: [String: SObjectDescribe] = [:]
-    private var describesInFlight: [String: Task<SObjectDescribe, Error>] = [:]
-    /// How far describing every SObject in the background has got, while it runs.
-    private(set) var backgroundDescribeProgress: (done: Int, total: Int)?
-    @ObservationIgnored private var backgroundDescribes: Task<Void, Never>?
+
+    /// The API whose SObjects the sidebar, diagram and query editor show: the current tab's,
+    /// except that Apex always uses the data API.
+    var schemaAPI: SalesforceAPI { workspace == .apex ? .data : currentTab.api }
+    var schema: SchemaCatalog { schemaAPI == .tooling ? toolingSchema : dataSchema }
+
+    var schemaSelection: SchemaItem? {
+        get { schema.selection }
+        set { schema.selection = newValue }
+    }
+    var expandedSObjects: Set<String> {
+        get { schema.expanded }
+        set { schema.expanded = newValue }
+    }
 
     // Query tabs
     private(set) var tabs: [QueryTab]
@@ -91,14 +101,6 @@ final class ExplorerModel {
     /// The fields picked by double-clicking in the schema sidebar, for building a query.
     private var pickedFields: (sobject: String, fields: [String])?
 
-    // SOQL editor
-    /// Changes when a describe the SOQL editor asked for arrives, so it can recheck the query.
-    private(set) var schemaGeneration = 0
-    @ObservationIgnored private var schemaObjects: [String: SoqlSchemaObject] = [:]
-    @ObservationIgnored private var pendingSchemaObjects: Set<String> = []
-    @ObservationIgnored private var sobjectNames: Set<String> = []
-    @ObservationIgnored private var sobjectsByKeyPrefix: [String: String] = [:]
-
     // Files
     /// Set by the File menu to show the open or save panel.
     var isOpeningFile = false
@@ -116,7 +118,10 @@ final class ExplorerModel {
     init() {
         let defaults = AppDefaults.store
         let saved = defaults.stringArray(forKey: "queryTabs") ?? [defaults.string(forKey: "soql") ?? "SELECT Id, Name FROM Account"]
-        let restored = (saved.isEmpty ? [""] : saved).map { QueryTab(soql: $0) }
+        let apis = defaults.stringArray(forKey: "queryTabAPIs") ?? []
+        let restored = (saved.isEmpty ? [""] : saved).enumerated().map { i, soql in
+            QueryTab(soql: soql, api: i < apis.count ? SalesforceAPI(rawValue: apis[i]) ?? .data : .data)
+        }
         let selected = min(max(0, defaults.integer(forKey: "selectedQueryTab")), restored.count - 1)
         tabs = restored
         selectedTabID = restored[selected].id
@@ -167,41 +172,36 @@ final class ExplorerModel {
                 : { @Sendable in try await SFCLI.session(for: username) }
             let session = try await newSession()
             let client = SalesforceClient(session: session, reauthenticate: newSession)
+            for catalog in [dataSchema, toolingSchema] {
+                catalog.didCallAPI = { [weak self] in await self?.refreshAPIUsage() }
+            }
+            toolingSchema.reset()
             // The global describe doubles as a check that the session works.
-            let types = try await client.describeGlobal()
+            try await dataSchema.load(using: client)
             self.session = session
             self.client = client
-            sobjects = types.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-            sobjectNames = Set(sobjects.map { $0.name.lowercased() })
-            sobjectsByKeyPrefix = Dictionary(sobjects.compactMap { s in s.keyPrefix.map { ($0, s.name) } }, uniquingKeysWith: { a, _ in a })
-            statusText = "Connected, \(sobjects.count) SObject types"
+            statusText = "Connected, \(dataSchema.sobjects.count) SObject types"
             currentTab.statusText = statusText
             history.load(username: session.username)
             let batchSize = AppDefaults.store.integer(forKey: "queryBatchSize")
             await client.setQueryBatchSize(batchSize > 0 ? batchSize : nil)
-            startBackgroundDescribes()
             Task { [icons] in
                 if let theme = try? await client.theme() { icons.load(theme: theme) }
             }
             await refreshAPIUsage()
             AppDefaults.store.set(username, forKey: "lastOrgUsername")
         } catch {
+            dataSchema.reset()
             statusText = ""
             self.error = DisplayedError("Unable to connect to \(org.alias ?? org.username)", error)
         }
     }
 
     func disconnect() {
-        backgroundDescribes?.cancel()
-        backgroundDescribes = nil
-        backgroundDescribeProgress = nil
         client = nil
         session = nil
-        sobjects = []
-        describes = [:]
-        describesInFlight = [:]
-        schemaSelection = nil
-        expandedSObjects = []
+        dataSchema.reset()
+        toolingSchema.reset()
         for tab in tabs {
             tab.results = nil
             tab.childResults = nil
@@ -209,10 +209,6 @@ final class ExplorerModel {
         }
         pickedFields = nil
         history.load(username: nil)
-        schemaObjects = [:]
-        pendingSchemaObjects = []
-        sobjectNames = []
-        sobjectsByKeyPrefix = [:]
         statusText = ""
         apiUsage = nil
         apex.clearRuns()
@@ -225,28 +221,26 @@ final class ExplorerModel {
 
     // MARK: - Schema
 
-    func cachedDescribe(_ sobject: String) -> SObjectDescribe? {
-        describes[sobject.lowercased()]
+    /// Loads the SObjects of the API the sidebar shows, the first time it shows them.
+    func loadSchemaIfNeeded() async {
+        let catalog = schema
+        guard let client, !catalog.isLoaded, !catalog.isLoading else { return }
+        do {
+            try await catalog.load(using: client)
+        } catch {
+            self.error = DisplayedError("Unable to list the \(catalog.api == .tooling ? "Tooling API" : "data API") SObjects", error)
+        }
+        await refreshAPIUsage()
     }
 
-    /// Describes an SObject, using the cache when possible. Concurrent requests for the same type share one call.
+    func cachedDescribe(_ sobject: String) -> SObjectDescribe? {
+        schema.cachedDescribe(sobject)
+    }
+
+    /// Describes an SObject of the API the sidebar shows.
     @discardableResult
     func describe(_ sobject: String) async throws -> SObjectDescribe {
-        let key = sobject.lowercased()
-        if let cached = describes[key] { return cached }
-        if let pending = describesInFlight[key] { return try await pending.value }
-        guard let client else { throw CancellationError() }
-        // The task caches the describe itself, so it's cached before any caller sees it.
-        let task = Task {
-            defer { describesInFlight[key] = nil }
-            let result = try await client.describe(sobject)
-            describes[key] = result
-            return result
-        }
-        describesInFlight[key] = task
-        let result = try await task.value
-        await refreshAPIUsage()
-        return result
+        try await schema.describe(sobject)
     }
 
     /// Describes an SObject for the UI, reporting failures in an alert.
@@ -259,72 +253,15 @@ final class ExplorerModel {
         }
     }
 
-    /// Describes every SObject, a few batches at a time, so the sidebar filter can find fields in
-    /// all of them. SoqlXplorer does the same. Describes the UI asks for go ahead separately.
-    private func startBackgroundDescribes() {
-        backgroundDescribes?.cancel()
-        guard AppDefaults.store.bool(forKey: "describeAllInBackground"), let client else { return }
-        backgroundDescribes = Task { await describeAll(using: client) }
-    }
-
-    private func describeAll(using client: SalesforceClient) async {
-        let names = sobjects.map(\.name)
-        var failures: [String: Int] = [:]
-        var batchSize = SalesforceClient.describeBatchLimit
-        func remaining() -> [String] {
-            names.filter { name in
-                let key = name.lowercased()
-                return describes[key] == nil && describesInFlight[key] == nil && failures[name, default: 0] < 3
-            }
-        }
-        var todo = remaining()
-        while !todo.isEmpty, !Task.isCancelled {
-            backgroundDescribeProgress = (names.count - todo.count, names.count)
-            let batches = stride(from: 0, to: min(todo.count, batchSize * 3), by: batchSize).map {
-                Array(todo[$0..<min($0 + batchSize, todo.count)])
-            }
-            await withTaskGroup(of: (batch: [String], result: Result<(describes: [SObjectDescribe], failed: [String]), Error>).self) { group in
-                for batch in batches {
-                    group.addTask {
-                        do {
-                            return (batch, .success(try await client.describe(batch: batch)))
-                        } catch {
-                            return (batch, .failure(error))
-                        }
-                    }
-                }
-                for await (batch, result) in group {
-                    switch result {
-                    case .success(let r):
-                        for describe in r.describes where describes[describe.name.lowercased()] == nil {
-                            describes[describe.name.lowercased()] = describe
-                        }
-                        for name in r.failed {
-                            failures[name] = 3
-                        }
-                    case .failure:
-                        // Try again in smaller batches, giving up on an SObject after a few failures.
-                        for name in batch {
-                            failures[name, default: 0] += 1
-                        }
-                        batchSize = max(1, batchSize / 2)
-                    }
-                }
-            }
-            await refreshAPIUsage()
-            todo = remaining()
-        }
-        backgroundDescribeProgress = nil
-    }
-
     /// SObjects whose name, label, or (already described) field names match the filter.
     var filteredSObjects: [GlobalSObject] {
         let filter = schemaFilter.trimmingCharacters(in: .whitespaces)
-        guard !filter.isEmpty else { return sobjects }
-        return sobjects.filter { sobject in
+        let catalog = schema
+        guard !filter.isEmpty else { return catalog.sobjects }
+        return catalog.sobjects.filter { sobject in
             sobject.name.localizedCaseInsensitiveContains(filter)
                 || sobject.label.localizedCaseInsensitiveContains(filter)
-                || (cachedDescribe(sobject.name)?.fields.contains { $0.name.localizedCaseInsensitiveContains(filter) } ?? false)
+                || (catalog.cachedDescribe(sobject.name)?.fields.contains { $0.name.localizedCaseInsensitiveContains(filter) } ?? false)
         }
     }
 
@@ -346,19 +283,20 @@ final class ExplorerModel {
         return results.nextRecordsURL != nil && results.rows.count < Self.tableRowLimit
     }
 
-    /// Runs the query in the editor. `includeDeleted` uses queryAll, which also returns deleted and archived rows.
+    /// Runs the query in the editor. `includeDeleted` uses queryAll, which also returns deleted
+    /// and archived rows; the Tooling API doesn't have it.
     func runQuery(includeDeleted: Bool = false) async {
         // The results go to the tab the query was run in, even if another is showing by then.
         let tab = currentTab
         let text = tab.soql.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let client, !text.isEmpty, !tab.isQuerying else { return }
+        guard let client, !text.isEmpty, !tab.isQuerying, !(includeDeleted && tab.api == .tooling) else { return }
         tab.isQuerying = true
         defer { tab.isQuerying = false }
         saveTabs()
         tab.statusText = "Running query…"
         let started = ContinuousClock.now
         do {
-            let result = try await client.query(text, includeDeleted: includeDeleted)
+            let result = try await client.query(text, includeDeleted: includeDeleted, api: tab.api)
             let time = Self.elapsed(since: started)
             history.add(text)
             tab.childResults = nil
@@ -368,7 +306,7 @@ final class ExplorerModel {
                     ? "Count query result is \(result.totalSize) rows \(time)"
                     : "Query returned 0 rows \(time)"
             } else {
-                tab.results = ResultSet(result: result)
+                tab.results = ResultSet(result: result, api: tab.api)
                 tab.results?.includesDeleted = includeDeleted
                 tab.results?.query = text
                 tab.statusText = rowsLoadedStatus(tab, time: time)
@@ -413,7 +351,7 @@ final class ExplorerModel {
         defer { tab.isQuerying = false }
         tab.statusText = "Getting the query plan…"
         do {
-            let plans = try await client.explain(text)
+            let plans = try await client.explain(text, api: tab.api)
             tab.statusText = ""
             queryPlan = QueryPlanResult(query: text, plans: plans)
         } catch {
@@ -426,8 +364,8 @@ final class ExplorerModel {
     // MARK: - Tabs
 
     /// Opens a new query tab after the current one and shows it.
-    func newTab(soql: String = "") {
-        let tab = QueryTab(soql: soql)
+    func newTab(soql: String = "", api: SalesforceAPI = .data) {
+        let tab = QueryTab(soql: soql, api: api)
         let index = (tabs.firstIndex { $0.id == selectedTabID } ?? tabs.count - 1) + 1
         tabs.insert(tab, at: index)
         selectedTabID = tab.id
@@ -461,9 +399,17 @@ final class ExplorerModel {
         saveTabs()
     }
 
+    /// Switches the current tab between the data API and the Tooling API. Its results stay
+    /// until the next query.
+    func toggleTabAPI() {
+        currentTab.api = currentTab.api == .tooling ? .data : .tooling
+        saveTabs()
+    }
+
     /// Remembers the tabs' queries for the next window.
     private func saveTabs() {
         AppDefaults.store.set(tabs.map(\.soql), forKey: "queryTabs")
+        AppDefaults.store.set(tabs.map(\.api.rawValue), forKey: "queryTabAPIs")
         AppDefaults.store.set(tabs.firstIndex { $0.id == selectedTabID } ?? 0, forKey: "selectedQueryTab")
     }
 
@@ -497,7 +443,7 @@ final class ExplorerModel {
     }
 
     func showChildResults(_ result: QueryResult, column: String, parentRowID: ResultRow.ID) {
-        childResults = ResultSet(result: result, title: column, parentRowID: parentRowID)
+        childResults = ResultSet(result: result, api: results?.api ?? .data, title: column, parentRowID: parentRowID)
         describeResultTypes(currentTab)
     }
 
@@ -524,7 +470,7 @@ final class ExplorerModel {
         do {
             let exporter = CSVExporter(client: client) { tab.statusText = $0 }
             var rows: Int?
-            if results.totalSize > Self.bulkExportThreshold, let query = results.query, BulkExport.canRun(query) {
+            if results.api == .data, results.totalSize > Self.bulkExportThreshold, let query = results.query, BulkExport.canRun(query) {
                 do {
                     rows = try await exporter.bulk(query, includeDeleted: results.includesDeleted, to: url)
                 } catch let error as CSVExporter.BulkJobUnavailable {
@@ -543,12 +489,13 @@ final class ExplorerModel {
         await refreshAPIUsage()
     }
 
-    /// Describes the SObject types in the results in the background, so the table knows which
-    /// fields can be edited.
+    /// Describes the SObject types in data API results in the background, so the table knows
+    /// which fields can be edited. Tooling API results are read-only.
     private func describeResultTypes(_ tab: QueryTab) {
-        let types = (tab.results?.sobjectTypes ?? []).union(tab.childResults?.sobjectTypes ?? [])
-        for type in types where knownSObject(type) && cachedDescribe(type) == nil {
-            Task { try? await describe(type) }
+        let types = [tab.results, tab.childResults].compactMap { $0 }.filter { $0.api == .data }
+            .reduce(into: Set<String>()) { $0.formUnion($1.sobjectTypes) }
+        for type in types where dataSchema.knownSObject(type) && dataSchema.cachedDescribe(type) == nil {
+            Task { try? await dataSchema.describe(type) }
         }
     }
 
@@ -556,8 +503,7 @@ final class ExplorerModel {
 
     /// The SObject type of a record Id, if the text is an Id with a key prefix this org knows.
     func sobjectType(ofRecordID text: String) -> String? {
-        guard text.count == 15 || text.count == 18, text.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber) }) else { return nil }
-        return sobjectsByKeyPrefix[String(text.prefix(3))]
+        dataSchema.sobjectType(ofRecordID: text) ?? toolingSchema.sobjectType(ofRecordID: text)
     }
 
     private static func elapsed(since start: ContinuousClock.Instant) -> String {
@@ -596,35 +542,5 @@ final class ExplorerModel {
             fields.removeAll { parts.contains($0) }
         }
         soql = fields.isEmpty ? "SELECT FROM \(describe.name)" : "SELECT \(fields.joined(separator: ", ")) FROM \(describe.name)"
-    }
-}
-
-extension ExplorerModel: SoqlDescriber {
-    func schemaObject(_ sobject: String) -> SoqlSchemaObject? {
-        let key = sobject.lowercased()
-        if let obj = schemaObjects[key] { return obj }
-        if let describe = cachedDescribe(sobject) {
-            let obj = SoqlSchemaObject(describe)
-            schemaObjects[key] = obj
-            return obj
-        }
-        // Fetch it in the background; the editor rechecks the query when it arrives.
-        if knownSObject(sobject), pendingSchemaObjects.insert(key).inserted {
-            Task {
-                if (try? await describe(sobject)) != nil {
-                    schemaGeneration += 1
-                }
-                pendingSchemaObjects.remove(key)
-            }
-        }
-        return nil
-    }
-
-    func knownSObject(_ sobject: String) -> Bool {
-        sobjectNames.contains(sobject.lowercased())
-    }
-
-    var allQueryableSObjects: [String] {
-        sobjects.filter(\.queryable).map(\.name)
     }
 }

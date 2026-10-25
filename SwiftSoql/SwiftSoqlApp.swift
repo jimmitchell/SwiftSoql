@@ -118,7 +118,11 @@ struct QueryCommands: Commands {
                 Task { await model?.runQuery(includeDeleted: true) }
             }
             .keyboardShortcut(.return, modifiers: [.command, .shift])
-            .disabled(model?.isConnected != true || model?.isQuerying == true || model?.workspace != .query)
+            .disabled(model?.isConnected != true || model?.isQuerying == true || model?.workspace != .query || model?.currentTab.api == .tooling)
+
+            Toggle("Use Tooling API in This Tab", isOn: Binding { model?.currentTab.api == .tooling } set: { _ in model?.toggleTabAPI() })
+                .keyboardShortcut("t", modifiers: [.control, .command])
+                .disabled(model?.isConnected != true || model?.workspace != .query)
 
             Divider()
 

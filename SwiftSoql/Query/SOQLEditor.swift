@@ -53,7 +53,7 @@ struct SOQLEditor: NSViewRepresentable {
                 textView.replaceCharacters(in: fullRange, with: text)
                 textView.didChangeText()
             }
-        } else if coordinator.colorizedGeneration != schemaGeneration {
+        } else if coordinator.colorizedGeneration != schemaGeneration || coordinator.colorizedDescriber !== describer {
             coordinator.colorize(textView)
         }
     }
@@ -67,6 +67,8 @@ struct SOQLEditor: NSViewRepresentable {
         private let analyzer = SoqlAnalyzer()
         fileprivate var completions = CompletionLocations()
         fileprivate var colorizedGeneration = -1
+        /// The describer the query was last checked against, which changes when the tab switches API.
+        fileprivate weak var colorizedDescriber: SoqlDescriber?
         /// True while SwiftUI is updating the view, when the binding can't be changed directly.
         fileprivate var isUpdatingView = false
         private var coloredLastTime = false
@@ -105,6 +107,7 @@ struct SOQLEditor: NSViewRepresentable {
         /// Checks the query and applies syntax colors, error underlines and completions.
         func colorize(_ textView: NSTextView) {
             colorizedGeneration = parent.schemaGeneration
+            colorizedDescriber = parent.describer
             guard let storage = textView.textStorage else { return }
             let defaults = AppDefaults.store
             guard defaults.bool(forKey: "soqlSyntaxHighlighting") else {

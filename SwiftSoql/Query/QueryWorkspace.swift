@@ -14,7 +14,7 @@ struct QueryWorkspace: View {
             VStack(spacing: 0) {
                 QueryTabBar(model: model)
                 Divider()
-                SOQLEditor(text: $model.soql, describer: model, schemaGeneration: model.schemaGeneration)
+                SOQLEditor(text: $model.soql, describer: model.schema, schemaGeneration: model.schema.schemaGeneration)
                     // Each tab gets its own editor, so undo stays within the tab.
                     .id(model.selectedTabID)
             }

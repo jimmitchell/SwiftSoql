@@ -26,6 +26,13 @@ nonisolated struct SalesforceError: LocalizedError {
     }
 }
 
+/// Which Salesforce API queries and describes go to: the regular data API, or the Tooling API
+/// with its metadata objects, such as ApexClass and CustomField.
+nonisolated enum SalesforceAPI: String, Sendable {
+    case data
+    case tooling
+}
+
 /// The outcome for one record of a delete or undelete.
 nonisolated struct SaveResult: Sendable {
     let success: Bool
@@ -67,13 +74,17 @@ actor SalesforceClient {
 
     private var dataPath: String { "/services/data/v\(session.apiVersion)" }
 
-    func describeGlobal() async throws -> [GlobalSObject] {
-        let json = try await get("\(dataPath)/sobjects")
+    private func path(_ api: SalesforceAPI) -> String {
+        api == .tooling ? "\(dataPath)/tooling" : dataPath
+    }
+
+    func describeGlobal(api: SalesforceAPI = .data) async throws -> [GlobalSObject] {
+        let json = try await get("\(path(api))/sobjects")
         return (json["sobjects"]?.array ?? []).compactMap { $0.object.map(GlobalSObject.init) }
     }
 
-    func describe(_ sobject: String) async throws -> SObjectDescribe {
-        let json = try await get("\(dataPath)/sobjects/\(Self.pathEncoded(sobject))/describe")
+    func describe(_ sobject: String, api: SalesforceAPI = .data) async throws -> SObjectDescribe {
+        let json = try await get("\(path(api))/sobjects/\(Self.pathEncoded(sobject))/describe")
         guard let obj = json.object else {
             throw SalesforceError(statusCode: 200, errorCode: "", message: "Unexpected describe response for \(sobject)")
         }
@@ -86,18 +97,18 @@ actor SalesforceClient {
     /// Describes several SObjects in one request with the composite API, which counts as a single
     /// API call. (The composite batch API counts each subrequest as a call.) Returns the
     /// describes, and the names that Salesforce couldn't describe.
-    func describe(batch sobjects: [String]) async throws -> (describes: [SObjectDescribe], failed: [String]) {
+    func describe(batch sobjects: [String], api: SalesforceAPI = .data) async throws -> (describes: [SObjectDescribe], failed: [String]) {
         let requests = sobjects.enumerated().map { i, name -> JSONValue in
             var request = JSONObject()
             request["method"] = .string("GET")
-            request["url"] = .string("\(dataPath)/sobjects/\(Self.pathEncoded(name))/describe")
+            request["url"] = .string("\(path(api))/sobjects/\(Self.pathEncoded(name))/describe")
             request["referenceId"] = .string("describe\(i)")
             return .object(request)
         }
         var body = JSONObject()
         body["allOrNone"] = .bool(false)
         body["compositeRequest"] = .array(requests)
-        let json = try await send("POST", "\(dataPath)/composite", body: .object(body))
+        let json = try await send("POST", "\(path(api))/composite", body: .object(body))
         var describes: [SObjectDescribe] = []
         var failed: [String] = []
         let results = json["compositeResponse"]?.array ?? []
@@ -111,13 +122,14 @@ actor SalesforceClient {
         return (describes, failed)
     }
 
-    /// Runs a SOQL query, or a SOSL search if the text starts with FIND.
-    func query(_ soql: String, includeDeleted: Bool = false) async throws -> QueryResult {
+    /// Runs a SOQL query, or a SOSL search if the text starts with FIND. The Tooling API has no
+    /// queryAll, so `includeDeleted` only works with the data API.
+    func query(_ soql: String, includeDeleted: Bool = false, api: SalesforceAPI = .data) async throws -> QueryResult {
         let q = [URLQueryItem(name: "q", value: soql)]
         if soql.lowercased().hasPrefix("find ") {
-            return QueryResult(searchResponse: try await get("\(dataPath)/search", query: q))
+            return QueryResult(searchResponse: try await get("\(path(api))/search", query: q))
         }
-        return QueryResult(json: try await send("GET", "\(dataPath)/\(includeDeleted ? "queryAll" : "query")", query: q, headers: queryHeaders))
+        return QueryResult(json: try await send("GET", "\(path(api))/\(includeDeleted ? "queryAll" : "query")", query: q, headers: queryHeaders))
     }
 
     /// Rows per batch for queries, from 200 to 2,000; nil for Salesforce's default (2,000).
@@ -137,8 +149,8 @@ actor SalesforceClient {
     }
 
     /// Asks Salesforce how it would run a query, without running it.
-    func explain(_ soql: String) async throws -> [QueryPlan] {
-        let json = try await get("\(dataPath)/query", query: [URLQueryItem(name: "explain", value: soql)])
+    func explain(_ soql: String, api: SalesforceAPI = .data) async throws -> [QueryPlan] {
+        let json = try await get("\(path(api))/query", query: [URLQueryItem(name: "explain", value: soql)])
         return (json["plans"]?.array ?? []).enumerated()
             .map { QueryPlan(id: $0.offset, json: $0.element) }
             .sorted { $0.relativeCost < $1.relativeCost }

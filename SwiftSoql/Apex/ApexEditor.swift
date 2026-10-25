@@ -131,7 +131,7 @@ struct ApexEditor: NSViewRepresentable {
             colorizedGeneration = parent.schemaGeneration
             queryCompletions.clear()
             queryRanges = ApexSource.inlineQueries(in: storage.string as NSString)
-            analyzer.describer = parent.model
+            analyzer.describer = parent.model.dataSchema
             for range in queryRanges {
                 let query = (storage.string as NSString).substring(with: range)
                 let masked = ApexSource.maskingBinds(in: query)
@@ -154,14 +154,15 @@ struct ApexEditor: NSViewRepresentable {
             if queryRanges.contains(where: { NSLocationInRange(range.location, $0) || NSMaxRange($0) == range.location }) {
                 return queryCompletions.completions(in: range)
             }
-            let model = parent.model
+            // Apex works with the data API's SObjects, whatever the query tab uses.
+            let schema = parent.model.dataSchema
             func sobjectNamed(_ name: String) -> String? {
-                model.sobjects.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }?.name
+                schema.sobjects.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }?.name
             }
             func fields(of sobject: String) -> [Completion] {
-                guard let describe = model.cachedDescribe(sobject) else {
+                guard let describe = schema.cachedDescribe(sobject) else {
                     // Fetch it for next time; the popup shows once it's described.
-                    _ = model.schemaObject(sobject)
+                    _ = schema.schemaObject(sobject)
                     return []
                 }
                 return describe.fields.map { Completion($0.name, type: .field) }
@@ -176,7 +177,7 @@ struct ApexEditor: NSViewRepresentable {
             case .word:
                 let typed = text.substring(with: range)
                 guard typed.count >= 2 else { return [] }
-                return model.sobjects.filter { $0.name.lowercased().hasPrefix(typed.lowercased()) }
+                return schema.sobjects.filter { $0.name.lowercased().hasPrefix(typed.lowercased()) }
                     .map { Completion($0.name, type: .sobject) }
             }
         }

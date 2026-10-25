@@ -40,7 +40,7 @@ struct SchemaSidebar: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            if let progress = model.backgroundDescribeProgress {
+            if let progress = model.schema.backgroundDescribeProgress {
                 VStack(alignment: .leading, spacing: 4) {
                     ProgressView(value: Double(progress.done), total: Double(max(progress.total, 1)))
                     Text("Describing SObjects: \(progress.done) of \(progress.total)")
@@ -53,7 +53,9 @@ struct SchemaSidebar: View {
             }
         }
         .overlay {
-            if sobjects.isEmpty && !model.schemaFilter.isEmpty {
+            if model.schema.isLoading {
+                ProgressView(model.schemaAPI == .tooling ? "Loading Tooling API SObjects…" : "Loading SObjects…")
+            } else if sobjects.isEmpty && !model.schemaFilter.isEmpty {
                 ContentUnavailableView.search(text: model.schemaFilter)
             }
         }

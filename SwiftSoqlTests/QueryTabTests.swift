@@ -37,6 +37,28 @@ struct QueryTabTests {
         #expect(AppDefaults.store.stringArray(forKey: "queryTabs") == [""])
     }
 
+    @Test func eachTabKeepsItsAPI() throws {
+        AppDefaults.store.set(["SELECT Id FROM Account"], forKey: "queryTabs")
+        AppDefaults.store.removeObject(forKey: "queryTabAPIs")
+        AppDefaults.store.set(0, forKey: "selectedQueryTab")
+        let m = ExplorerModel()
+        #expect(m.currentTab.api == .data && m.schema === m.dataSchema)
+        m.newTab(soql: "SELECT Id FROM ApexClass")
+        m.toggleTabAPI()
+        #expect(m.currentTab.api == .tooling && m.schema === m.toolingSchema)
+        // Apex always uses the data API's SObjects.
+        m.workspace = .apex
+        #expect(m.schema === m.dataSchema)
+        #expect(AppDefaults.store.stringArray(forKey: "queryTabAPIs") == ["data", "tooling"])
+        let restored = ExplorerModel()
+        #expect(restored.tabs.map(\.api) == [.data, .tooling])
+
+        let json = #"{"totalSize":1,"done":true,"records":[{"attributes":{"type":"ApexClass"},"Id":"01p000000000001AAA","Name":"A"}]}"#
+        let result = QueryResult(json: try JSONValue.parse(Data(json.utf8)))
+        #expect(ResultSet(result: result).isEditable)
+        #expect(!ResultSet(result: result, api: .tooling).isEditable, "Tooling API results are read-only")
+    }
+
     @Test func formatQueryReplacesTheTabsText() {
         let m = ExplorerModel()
         m.soql = "SELECT Id, Name FROM Account WHERE Name = 'x'"
