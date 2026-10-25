@@ -149,6 +149,7 @@ struct QueryCommands: Commands {
                 Text("Query").tag(Workspace.query).keyboardShortcut("1", modifiers: .command)
                 Text("Anonymous Apex").tag(Workspace.apex).keyboardShortcut("2", modifiers: .command)
                 Text("Schema Diagram").tag(Workspace.schema).keyboardShortcut("3", modifiers: .command)
+                Text("Debug Logs").tag(Workspace.logs).keyboardShortcut("4", modifiers: .command)
             }
             .pickerStyle(.inline)
             .disabled(model?.isConnected != true)

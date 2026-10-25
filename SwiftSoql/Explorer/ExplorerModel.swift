@@ -30,6 +30,7 @@ enum Workspace: String, CaseIterable, Identifiable {
     case query = "Query"
     case apex = "Apex"
     case schema = "Schema"
+    case logs = "Logs"
 
     var id: String { rawValue }
 }
@@ -119,6 +120,7 @@ final class ExplorerModel {
     // Anonymous Apex
     var workspace = Workspace.query
     let apex = ApexModel()
+    let logs = LogsModel()
 
     var isConnected: Bool { client != nil }
 
@@ -157,7 +159,7 @@ final class ExplorerModel {
         switch workspace {
         case .query: isConnected && !isQuerying
         case .apex: canChangeData && !apex.isRunning
-        case .schema: false
+        case .schema, .logs: false
         }
     }
 
@@ -166,7 +168,7 @@ final class ExplorerModel {
         switch workspace {
         case .query: await runQuery(includeDeleted: includeDeleted)
         case .apex: await executeApex()
-        case .schema: break
+        case .schema, .logs: break
         }
     }
 
@@ -235,6 +237,7 @@ final class ExplorerModel {
         isGuarded = false
         isLocked = false
         inspectedRecords = []
+        logs.reset()
         dataSchema.reset()
         toolingSchema.reset()
         for tab in tabs {

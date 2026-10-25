@@ -23,6 +23,9 @@ A Mac app for exploring Salesforce orgs, written in SwiftUI. It's a port of Simo
   Data Dictionary…).
 - **Org limits:** Query ▸ Org Limits… (⇧⌘L), or click the API counter, to see every limit, most
   used first.
+- **Debug logs:** the Logs workspace (⌘4) lists your logs, everyone's or one user's, shows a
+  log with filters, starts and stops logging for you or another user, follows new logs, and
+  deletes them.
 - **Anonymous Apex:** run all of it or just the selected lines and read the debug log, with SOQL
   checking and completions in the editor, and a library of saved snippets.
 

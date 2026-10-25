@@ -289,7 +289,8 @@ struct ApexWorkspace: View {
 /// `|[4]|` are links that move the editor to that line of the code.
 struct LogTextView: NSViewRepresentable {
     let text: String
-    var onLine: (Int) -> Void = { _ in }
+    /// Called with a line reference's number when it's clicked; without it, they aren't links.
+    var onLine: ((Int) -> Void)?
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSTextView.scrollableTextView()
@@ -324,11 +325,11 @@ struct LogTextView: NSViewRepresentable {
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
-        var onLine: (Int) -> Void
+        var onLine: ((Int) -> Void)?
         fileprivate var shown = ""
         private static let lineReference = try! NSRegularExpression(pattern: #"\|\[(\d+)\]\|"#)
 
-        init(onLine: @escaping (Int) -> Void) {
+        init(onLine: ((Int) -> Void)?) {
             self.onLine = onLine
         }
 
@@ -338,7 +339,7 @@ struct LogTextView: NSViewRepresentable {
                 .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
                 .foregroundColor: NSColor.textColor,
             ])
-            for match in Self.lineReference.matches(in: text, range: NSRange(location: 0, length: styled.length)) {
+            for match in onLine == nil ? [] : Self.lineReference.matches(in: text, range: NSRange(location: 0, length: styled.length)) {
                 let number = match.range(at: 1)
                 styled.addAttribute(.link, value: "apexline:\((text as NSString).substring(with: number))", range: number)
             }
@@ -347,7 +348,7 @@ struct LogTextView: NSViewRepresentable {
 
         func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
             guard let link = link as? String, link.hasPrefix("apexline:"), let line = Int(link.dropFirst("apexline:".count)) else { return false }
-            onLine(line)
+            onLine?(line)
             return true
         }
     }

@@ -216,8 +216,8 @@ actor SalesforceClient {
     }
 
     /// Creates a record and returns its Id.
-    func create(_ sobject: String, fields: JSONObject) async throws -> String {
-        let json = try await send("POST", "\(dataPath)/sobjects/\(Self.pathEncoded(sobject))", body: .object(fields))
+    func create(_ sobject: String, fields: JSONObject, api: SalesforceAPI = .data) async throws -> String {
+        let json = try await send("POST", "\(path(api))/sobjects/\(Self.pathEncoded(sobject))", body: .object(fields))
         guard let id = json["id"]?.string else {
             throw SalesforceError(statusCode: 200, errorCode: "", message: "Salesforce didn't return the new record's Id.")
         }
@@ -234,8 +234,8 @@ actor SalesforceClient {
     }
 
     /// Changes fields on a record. A null value clears the field.
-    func update(_ sobject: String, id: String, fields: JSONObject) async throws {
-        _ = try await send("PATCH", "\(dataPath)/sobjects/\(Self.pathEncoded(sobject))/\(Self.pathEncoded(id))", body: .object(fields))
+    func update(_ sobject: String, id: String, fields: JSONObject, api: SalesforceAPI = .data) async throws {
+        _ = try await send("PATCH", "\(path(api))/sobjects/\(Self.pathEncoded(sobject))/\(Self.pathEncoded(id))", body: .object(fields))
     }
 
     /// Deletes up to 200 records. Each record succeeds or fails on its own, and the results are in
@@ -340,6 +340,92 @@ actor SalesforceClient {
     /// One kind of a finished ingest job's results, as CSV.
     func ingestResults(_ jobID: String, _ kind: IngestResults) async throws -> Data {
         try await sendRaw("GET", "\(dataPath)/jobs/ingest/\(Self.pathEncoded(jobID))/\(kind.rawValue)", accept: "text/csv").0
+    }
+
+    // MARK: Debug logs
+
+    /// The Id of the user this session is for.
+    func currentUserID() async throws -> String {
+        let username = session.username.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'")
+        guard let id = try await query("SELECT Id FROM User WHERE Username = '\(username)'").records.first?["Id"]?.string else {
+            throw SalesforceError(statusCode: 200, errorCode: "", message: "Couldn't find the user \(session.username).")
+        }
+        return id
+    }
+
+    /// The newest debug logs, of one user or of everyone.
+    func apexLogs(userID: String?, limit: Int = 200) async throws -> [ApexLogEntry] {
+        let filter = userID.map { " WHERE LogUserId = '\($0)'" } ?? ""
+        return try await query("SELECT \(ApexLogEntry.fields) FROM ApexLog\(filter) ORDER BY StartTime DESC LIMIT \(limit)")
+            .records.compactMap(ApexLogEntry.init)
+    }
+
+    /// The users who have debug logs, by name.
+    func apexLogUsers() async throws -> [(id: String, name: String)] {
+        try await query("SELECT LogUserId, LogUser.Name name FROM ApexLog GROUP BY LogUserId, LogUser.Name").records
+            .compactMap { r in r["LogUserId"]?.string.map { ($0, r["name"]?.string ?? $0) } }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /// A debug log's text.
+    func apexLogBody(_ id: String) async throws -> String {
+        let (data, _) = try await sendRaw("GET", "\(dataPath)/sobjects/ApexLog/\(Self.pathEncoded(id))/Body", accept: "text/plain")
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// Active users whose name or username contains some text, for choosing whom to log.
+    func users(matching text: String) async throws -> [(id: String, name: String, username: String)] {
+        let like = text.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'")
+            .replacingOccurrences(of: "%", with: "\\%").replacingOccurrences(of: "_", with: "\\_")
+        return try await query("SELECT Id, Name, Username FROM User WHERE IsActive = true AND (Name LIKE '%\(like)%' OR Username LIKE '%\(like)%') ORDER BY Name LIMIT 50")
+            .records.compactMap { r in r["Id"]?.string.map { ($0, r["Name"]?.string ?? "", r["Username"]?.string ?? "") } }
+    }
+
+    /// The user's trace flag for debug logs, if there is one, active or not.
+    func traceFlag(for userID: String) async throws -> TraceFlagInfo? {
+        let records = try await query("SELECT Id, ExpirationDate FROM TraceFlag WHERE TracedEntityId = '\(userID)' AND LogType = 'USER_DEBUG' ORDER BY ExpirationDate DESC LIMIT 1", api: .tooling).records
+        return records.first.flatMap { r in
+            r["Id"]?.string.map { TraceFlagInfo(id: $0, userID: userID, expiration: r["ExpirationDate"]?.string.flatMap(SalesforceDateTime.parse)) }
+        }
+    }
+
+    /// Records debug logs for a user until `until` (at most 24 hours away), at the given levels,
+    /// with a debug level named SwiftSoql that this creates or updates.
+    func startTraceFlag(for userID: String, until expiration: Date, levels: [ApexLogCategory: ApexLogLevel]) async throws -> TraceFlagInfo {
+        var level = JSONObject()
+        level["DeveloperName"] = .string("SwiftSoql")
+        level["MasterLabel"] = .string("SwiftSoql")
+        for category in ApexLogCategory.allCases {
+            level[category.debugLevelField] = .string((levels[category] ?? category.defaultLevel).rawValue.uppercased())
+        }
+        for field in ["System", "Visualforce", "Wave", "Nba"] {
+            level[field] = .string("INFO")
+        }
+        let levelID: String
+        if let existing = try await query("SELECT Id FROM DebugLevel WHERE DeveloperName = 'SwiftSoql'", api: .tooling).records.first?["Id"]?.string {
+            levelID = existing
+            level["DeveloperName"] = nil
+            try await update("DebugLevel", id: existing, fields: level, api: .tooling)
+        } else {
+            levelID = try await create("DebugLevel", fields: level, api: .tooling)
+        }
+        var flag = JSONObject()
+        flag["DebugLevelId"] = .string(levelID)
+        flag["StartDate"] = .string(SalesforceDateTime.format(Date()))
+        flag["ExpirationDate"] = .string(SalesforceDateTime.format(expiration))
+        if let existing = try await traceFlag(for: userID) {
+            try await update("TraceFlag", id: existing.id, fields: flag, api: .tooling)
+            return TraceFlagInfo(id: existing.id, userID: userID, expiration: expiration)
+        }
+        flag["TracedEntityId"] = .string(userID)
+        flag["LogType"] = .string("USER_DEBUG")
+        let id = try await create("TraceFlag", fields: flag, api: .tooling)
+        return TraceFlagInfo(id: id, userID: userID, expiration: expiration)
+    }
+
+    /// Stops recording debug logs by deleting the trace flag.
+    func stopTraceFlag(_ id: String) async throws {
+        _ = try await send("DELETE", "\(path(.tooling))/sobjects/TraceFlag/\(Self.pathEncoded(id))")
     }
 
     /// Runs anonymous Apex and returns the outcome with its debug log.

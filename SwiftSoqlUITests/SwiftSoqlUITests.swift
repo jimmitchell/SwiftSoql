@@ -296,6 +296,56 @@ final class SwiftSoqlUITests: XCTestCase {
         XCTAssertEqual(apexEditor.value as? String, "System.debug('snippet');", "Choosing the snippet inserts it")
     }
 
+    /// Starts logging, runs Apex to make a log, reads it in the Logs workspace, deletes it and
+    /// stops logging.
+    @MainActor
+    func testDebugLogs() throws {
+        try XCTSkipIf(testOrg == nil, "Set SWIFTSOQL_TEST_ORG to run this test")
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["SWIFTSOQL_TEST_WRITES"] == "YES", "Set SWIFTSOQL_TEST_WRITES=YES to let this test start logging and delete logs")
+        try launch()
+        let marker = "SwiftSoql log test \(UUID().uuidString.prefix(8))"
+        app.typeKey("4", modifierFlags: .command)
+        let start = app.descendants(matching: .any)["startLogging"].firstMatch
+        let status = app.descendants(matching: .any)["loggingStatus"].firstMatch
+        // An earlier run may have left logging on.
+        let ready = NSPredicate { _, _ in start.exists || status.exists }
+        wait(for: [XCTNSPredicateExpectation(predicate: ready, object: nil)], timeout: 30)
+        if !status.exists {
+            start.click()
+            app.menuItems["For 30 Minutes"].click()
+        }
+        XCTAssertTrue(status.waitForExistence(timeout: 30), "Logging should start")
+
+        app.typeKey("2", modifierFlags: .command)
+        let apexEditor = app.textViews["apexEditor"]
+        XCTAssertTrue(apexEditor.waitForExistence(timeout: 10))
+        apexEditor.click()
+        apexEditor.typeKey("a", modifierFlags: .command)
+        apexEditor.typeText("System.debug('\(marker)');")
+        app.typeKey(.return, modifierFlags: .command)
+        XCTAssertTrue(text("Success", in: app.outlines.matching(identifier: "apexRuns").firstMatch).waitForExistence(timeout: 60))
+
+        app.typeKey("4", modifierFlags: .command)
+        let logList = app.outlines.matching(identifier: "debugLogs").firstMatch
+        app.buttons["Refresh"].click()
+        XCTAssertTrue(logList.outlineRows.firstMatch.waitForExistence(timeout: 30), "The run should leave a log")
+        // The columns are wider than the list, so click near the row's left end.
+        let firstLog = logList.outlineRows.element(boundBy: 0).coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0.5)).withOffset(CGVector(dx: 30, dy: 0))
+        firstLog.click()
+        let body = app.textViews["debugLogText"]
+        let hasMarker = NSPredicate(format: "value CONTAINS %@", marker)
+        wait(for: [XCTNSPredicateExpectation(predicate: hasMarker, object: body)], timeout: 30)
+
+        let count = logList.outlineRows.count
+        firstLog.rightClick()
+        app.menuItems["Delete Log"].click()
+        let fewer = NSPredicate(format: "count < %d", count)
+        wait(for: [XCTNSPredicateExpectation(predicate: fewer, object: logList.outlineRows)], timeout: 30)
+
+        status.buttons["Stop"].click()
+        XCTAssertTrue(start.waitForExistence(timeout: 30), "Stopping logging brings back Start Logging")
+    }
+
     @MainActor
     func testFormatQuery() throws {
         try XCTSkipIf(testOrg == nil, "Set SWIFTSOQL_TEST_ORG to run this test")

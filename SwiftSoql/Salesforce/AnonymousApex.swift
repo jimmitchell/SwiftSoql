@@ -22,6 +22,18 @@ nonisolated enum ApexLogCategory: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// The DebugLevel field for this category, for trace flags.
+    var debugLevelField: String {
+        switch self {
+        case .db: "Database"
+        case .workflow: "Workflow"
+        case .validation: "Validation"
+        case .callout: "Callout"
+        case .apexCode: "ApexCode"
+        case .apexProfiling: "ApexProfiling"
+        }
+    }
+
     /// The level used until the user picks one: enough to see System.debug output and DML.
     var defaultLevel: ApexLogLevel {
         switch self {
