@@ -170,3 +170,11 @@ STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
 IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 ```
+
+## Font Awesome
+
+The app icon (`SwiftSoql/AppIcon.icon`) is made from the "cloud" and "gear" icons of
+[Font Awesome Free](https://fontawesome.com) 7.3.1 by Fonticons, Inc., used under the
+[Creative Commons Attribution 4.0 International license](https://creativecommons.org/licenses/by/4.0/)
+(see [fontawesome.com/license/free](https://fontawesome.com/license/free)). The icons were
+recolored and arranged for the app icon.
