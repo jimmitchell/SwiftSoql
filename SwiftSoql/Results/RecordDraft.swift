@@ -50,3 +50,10 @@ struct RecordDraft: Identifiable {
         return fields
     }
 }
+
+/// A record to show in the inspector.
+struct RecordReference: Hashable {
+    let sobject: String
+    let id: String
+    let api: SalesforceAPI
+}

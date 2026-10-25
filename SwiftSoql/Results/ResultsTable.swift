@@ -18,6 +18,8 @@ struct ResultsTable: View {
     var onOpenChild: (QueryResult, String, ResultRow.ID) -> Void = { _, _, _ in }
 
     @State private var selection = Set<ResultRow.ID>()
+    /// Hidden and reordered columns, from the header's menu or by dragging. Reset for new results.
+    @State private var columnCustomization = TableColumnCustomization<ResultRow>()
     @Environment(\.openURL) private var openURL
 
     /// More than this many records at once would flood the browser with tabs.
@@ -41,7 +43,7 @@ struct ResultsTable: View {
     }
 
     var body: some View {
-        Table(resultSet.rows, selection: $selection, sortOrder: sortOrder) {
+        Table(resultSet.visibleRows, selection: $selection, sortOrder: sortOrder, columnCustomization: $columnCustomization) {
             TableColumnForEach(tableColumns, id: \.self) { column in
                 // Every column needs the same kind of sort; the checkbox and error columns sort
                 // by the original order.
@@ -51,6 +53,8 @@ struct ResultsTable: View {
                         checkbox(row)
                     }
                     .width(22)
+                    .customizationID("✓")
+                    .disabledCustomizationBehavior(.all)
                 case .error:
                     TableColumn("Error", sortUsing: ResultSortComparator(column: "")) { row in
                         let message = resultSet.rowErrors[row.id] ?? ""
@@ -60,16 +64,19 @@ struct ResultsTable: View {
                             .help(message)
                     }
                     .width(min: 40, ideal: 240)
+                    .customizationID("⚠")
                 case .field(let name):
                     TableColumn(name, sortUsing: ResultSortComparator(column: name)) { row in
                         cell(row, column: name)
                     }
                     .width(min: 40, ideal: resultSet.idealWidth(for: name))
+                    .customizationID(name)
                 }
             }
         }
         // A new result set can have entirely different columns, so start the table afresh.
         .id(resultSet.id)
+        .onChange(of: resultSet.id) { columnCustomization = TableColumnCustomization() }
         .accessibilityIdentifier(accessibilityID)
         .contextMenu(forSelectionType: ResultRow.ID.self) { ids in
             Button("Copy") { copy(ids, includeHeader: false) }
@@ -83,7 +90,16 @@ struct ResultsTable: View {
             .disabled(ids.isEmpty)
             Button("Show in Loaded Order") { sortOrder.wrappedValue = [] }
                 .disabled(sortOrder.wrappedValue.isEmpty)
+            Button("Show All Columns") { columnCustomization = TableColumnCustomization() }
+                .disabled(!resultSet.columns.contains { columnCustomization[visibility: $0] == .hidden })
             Divider()
+            if ids.count == 1, let row = resultSet.rows.first(where: { ids.contains($0.id) }), row.recordID != nil, row.record.sobjectType != nil {
+                Button("Show All Fields") {
+                    model.inspectRecord(in: row, api: resultSet.api)
+                    AppDefaults.store.set(InspectorPanel.Tab.record.rawValue, forKey: "inspectorTab")
+                    AppDefaults.store.set(true, forKey: "showDetailsInspector")
+                }
+            }
             openInSalesforceItems(ids)
             if resultSet.isEditable, model.canChangeData, ids.count == 1, let row = resultSet.rows.first(where: { ids.contains($0.id) }), row.recordID != nil {
                 Button("Clone Record…") {
@@ -98,13 +114,19 @@ struct ResultsTable: View {
                 Button("Uncheck Rows") { checkedRows.wrappedValue.subtract(ids) }
                     .disabled(ids.isEmpty)
                 Divider()
-                Button("Check All Rows") { checkedRows.wrappedValue = Set(resultSet.rows.map(\.id)) }
+                Button(resultSet.filter.isEmpty ? "Check All Rows" : "Check All Shown Rows") { checkedRows.wrappedValue.formUnion(resultSet.visibleRows.map(\.id)) }
                 Button("Uncheck All Rows") { checkedRows.wrappedValue = [] }
                     .disabled(checkedRows.wrappedValue.isEmpty)
             }
         }
         .onChange(of: resultSet.highlightedRowID, initial: true) { _, id in
             if let id { selection = [id] }
+        }
+        // The inspector's Record tab follows the selected row.
+        .onChange(of: selection) {
+            if selection.count == 1, let row = resultSet.rows.first(where: { selection.contains($0.id) }) {
+                model.inspectRecord(in: row, api: resultSet.api)
+            }
         }
         .onCopyCommand {
             let text = ResultsExport.tabSeparated(resultSet, rowIDs: selection, includeHeader: false)

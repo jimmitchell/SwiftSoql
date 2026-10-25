@@ -79,4 +79,24 @@ struct ResultSortTests {
         rs.applyUpdate(recordID: "001A", field: "Missing", value: .string("x"))
         #expect(rs.rows[0].record["Missing"] == nil)
     }
+
+    @Test func filterNarrowsShownRowsAcrossColumns() throws {
+        var rs = try resultSet()
+        rs.setFilter("item")
+        #expect(rs.visibleRows.count == 3, "Matches ignore case")
+        rs.setFilter("AMY")
+        #expect(rs.visibleRows.map { $0.record["Name"]?.string } == ["Item 2"], "Related fields' columns match too")
+        rs.setFilter("100.5")
+        #expect(rs.visibleRows.count == 1, "Numbers match as text")
+
+        rs.setFilter("item")
+        rs.sort(by: [ResultSortComparator(column: "Name")])
+        #expect(rs.visibleRows.map { $0.record["Name"]?.string } == ["item 1", "Item 2", "Item 10"], "Sorting keeps the filter")
+        rs.removeRows([rs.visibleRows[0].id])
+        #expect(rs.visibleRows.count == 2 && rs.rows.count == 3)
+        rs.insertFirst(try #require(try JSONValue.parse(Data(#"{"attributes":{"type":"Account"},"Name":"Zeta"}"#.utf8)).object))
+        #expect(rs.visibleRows.first?.record["Name"]?.string == "Zeta", "A new record shows even if it doesn't match")
+        rs.setFilter("")
+        #expect(rs.visibleRows.count == rs.rows.count)
+    }
 }

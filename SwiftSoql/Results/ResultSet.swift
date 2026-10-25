@@ -35,6 +35,31 @@ struct ResultSet: Identifiable {
     /// A row to select, such as a record just created.
     var highlightedRowID: ResultRow.ID?
 
+    /// Text that narrows the rows shown to those with a column containing it; empty shows all.
+    private(set) var filter = ""
+    /// The rows matching `filter`, when there is one.
+    private var filteredRows: [ResultRow]?
+
+    /// The rows to show: those matching the filter, in table order. Exports use every row.
+    var visibleRows: [ResultRow] { filteredRows ?? rows }
+
+    mutating func setFilter(_ text: String) {
+        filter = text
+        refilter()
+    }
+
+    private mutating func refilter() {
+        let needle = filter.trimmingCharacters(in: .whitespaces)
+        guard !needle.isEmpty else {
+            filteredRows = nil
+            return
+        }
+        let paths = columns.map { $0.split(separator: ".") }
+        filteredRows = rows.filter { row in
+            paths.contains { row.record.value(atPath: $0)?.displayText?.localizedCaseInsensitiveContains(needle) == true }
+        }
+    }
+
     private var nextRowID = 0
 
     init(result: QueryResult, api: SalesforceAPI = .data, title: String? = nil, parentRowID: ResultRow.ID? = nil) {
@@ -82,12 +107,14 @@ struct ResultSet: Identifiable {
         if !sortOrder.isEmpty {
             rows = ResultSortComparator.sorted(rows, by: sortOrder)
         }
+        refilter()
     }
 
     /// Sorts the rows, or puts them back in the order they were loaded if `order` is empty.
     mutating func sort(by order: [ResultSortComparator]) {
         sortOrder = order
         rows = ResultSortComparator.sorted(rows, by: order)
+        refilter()
     }
 
     /// Adds a record, such as one just created, as the first row and highlights it.
@@ -100,6 +127,8 @@ struct ResultSet: Identifiable {
             sobjectTypes.insert(type)
         }
         highlightedRowID = row.id
+        // A new record shows even if it doesn't match the filter.
+        filteredRows?.insert(row, at: 0)
     }
 
     /// Removes deleted rows.
@@ -111,6 +140,7 @@ struct ResultSet: Identifiable {
         for id in ids {
             rowErrors[id] = nil
         }
+        filteredRows?.removeAll { ids.contains($0.id) }
     }
 
     /// Records a saved change in every copy of the record: its row, and wherever it appears as a
@@ -120,6 +150,11 @@ struct ResultSet: Identifiable {
             if case .object(let updated) = JSONValue.object(rows[i].record).updatingRecords(id: recordID, field: field, value: value) {
                 rows[i].record = updated
             }
+        }
+        // Edited rows stay shown, with their new values, until the filter changes.
+        if let shown = filteredRows {
+            let byID = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
+            filteredRows = shown.compactMap { byID[$0.id] }
         }
     }
 }

@@ -1,12 +1,14 @@
 import AppKit
 import SwiftUI
 
-/// The inspector: details of the schema selection, or the queries run recently.
+/// The inspector: details of the schema selection, every field of the selected record, or the
+/// queries run recently.
 struct InspectorPanel: View {
     let model: ExplorerModel
 
     enum Tab: String, CaseIterable, Identifiable {
         case details = "Details"
+        case record = "Record"
         case recent = "Recent Queries"
 
         var id: String { rawValue }
@@ -28,6 +30,7 @@ struct InspectorPanel: View {
             Group {
                 switch tab {
                 case .details: DetailsInspector(model: model)
+                case .record: RecordInspector(model: model)
                 case .recent: RecentQueriesList(model: model)
                 }
             }

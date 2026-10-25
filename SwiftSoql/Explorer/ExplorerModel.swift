@@ -100,6 +100,9 @@ final class ExplorerModel {
     var recordDraft: RecordDraft?
     /// A CSV file being imported, while its sheet shows.
     var csvImport: CSVImport?
+    /// The records in the inspector's Record tab: the one shown last, after any it was reached
+    /// from by following lookups.
+    var inspectedRecords: [RecordReference] = []
     /// The queries run and pinned in this org.
     let history = QueryHistory()
     /// The fields picked by double-clicking in the schema sidebar, for building a query.
@@ -231,6 +234,7 @@ final class ExplorerModel {
         orgKind = nil
         isGuarded = false
         isLocked = false
+        inspectedRecords = []
         dataSchema.reset()
         toolingSchema.reset()
         for tab in tabs {

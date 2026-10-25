@@ -139,7 +139,14 @@ struct QueryWorkspace: View {
                 }
                 .disabled(model.isQuerying)
             }
-            if model.results != nil {
+            if let results = model.results {
+                ResultsFilterField(text: Binding { results.filter } set: { model.results?.setFilter($0) })
+                if !results.filter.isEmpty {
+                    Text("\(results.visibleRows.count.formatted()) of \(results.rows.count.formatted())")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                        .accessibilityIdentifier("filterCount")
+                }
                 Picker("Show", selection: $showJSON) {
                     Text("Table").tag(false)
                     Text("JSON").tag(true)
@@ -228,5 +235,35 @@ struct QueryWorkspace: View {
     private func prepareExport() {
         guard let results = model.results else { return }
         exportDocument = ExportDocument(text: exportFormat == .json ? ResultsExport.json(results.rows.map(\.record)) : ResultsExport.csv(results))
+    }
+}
+
+/// A small search field that narrows the loaded rows as you type.
+private struct ResultsFilterField: View {
+    @Binding var text: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "line.3.horizontal.decrease")
+                .foregroundStyle(.secondary)
+            TextField("Filter Rows", text: $text)
+                .textFieldStyle(.plain)
+                .frame(width: 130)
+                .accessibilityIdentifier("resultsFilter")
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Clear Filter")
+            }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(0.06)))
+        .help("Show only the loaded rows with a value containing this text")
     }
 }

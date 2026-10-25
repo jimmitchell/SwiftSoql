@@ -188,6 +188,37 @@ final class SwiftSoqlUITests: XCTestCase {
         XCTAssertFalse(results.checkBoxes.firstMatch.waitForExistence(timeout: 2), "Locking again removes the checkboxes")
     }
 
+    /// Filters the loaded rows, then shows a row's record in the inspector and follows its owner.
+    @MainActor
+    func testFilterRowsAndInspectRecord() throws {
+        try XCTSkipIf(testOrg == nil, "Set SWIFTSOQL_TEST_ORG to run this test")
+        try launch(extraArguments: ["-inspectorTab", "Record"])
+        setQuery("SELECT Id, Name, OwnerId FROM Account ORDER BY Name LIMIT 3")
+        runQuery()
+        XCTAssertTrue(waitForStatus("Loaded 3"))
+
+        let filter = app.textFields["resultsFilter"]
+        filter.click()
+        filter.typeText("no account has this text")
+        XCTAssertEqual(app.staticTexts["filterCount"].value as? String, "0 of 3")
+        XCTAssertEqual(results.outlineRows.count, 0)
+        filter.typeKey("a", modifierFlags: .command)
+        filter.typeKey(.delete, modifierFlags: [])
+        XCTAssertEqual(results.outlineRows.count, 3, "Clearing the filter shows every row")
+
+        results.outlineRows.element(boundBy: 0).coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)).click()
+        XCTAssertTrue(text("Account Name", in: app.windows.firstMatch).waitForExistence(timeout: 30), "The Record tab lists the record's fields by label")
+        XCTAssertTrue(text("Created Date", in: app.windows.firstMatch).exists, "Fields the query didn't select are shown too")
+
+        // Link-style buttons appear to UI tests as links.
+        let owner = app.descendants(matching: .any).matching(NSPredicate(format: "(elementType == %d OR elementType == %d) AND (title BEGINSWITH '005' OR label BEGINSWITH '005')", XCUIElement.ElementType.link.rawValue, XCUIElement.ElementType.button.rawValue)).firstMatch
+        XCTAssertTrue(owner.waitForExistence(timeout: 10), "The owner is a link")
+        owner.click()
+        XCTAssertTrue(text("Username", in: app.windows.firstMatch).waitForExistence(timeout: 30), "Following the owner shows the User's fields")
+        app.buttons["Back"].click()
+        XCTAssertTrue(text("Account Name", in: app.windows.firstMatch).waitForExistence(timeout: 30), "Back returns to the Account")
+    }
+
     @MainActor
     func testFormatQuery() throws {
         try XCTSkipIf(testOrg == nil, "Set SWIFTSOQL_TEST_ORG to run this test")

@@ -220,8 +220,8 @@ actor SalesforceClient {
     }
 
     /// Every field of one record.
-    func record(_ sobject: String, id: String) async throws -> JSONObject {
-        let json = try await get("\(dataPath)/sobjects/\(Self.pathEncoded(sobject))/\(Self.pathEncoded(id))")
+    func record(_ sobject: String, id: String, api: SalesforceAPI = .data) async throws -> JSONObject {
+        let json = try await get("\(path(api))/sobjects/\(Self.pathEncoded(sobject))/\(Self.pathEncoded(id))")
         guard let object = json.object else {
             throw SalesforceError(statusCode: 200, errorCode: "", message: "Unexpected response for record \(id)")
         }

@@ -28,8 +28,15 @@ extension ExplorerModel {
     /// value Salesforce saved. Returns whether the change was saved.
     @discardableResult
     func saveEdit(_ text: String, field: String, row: ResultRow) async -> Bool {
-        guard let client, canChangeData, let id = row.recordID, let type = row.record.sobjectType else { return false }
+        guard let id = row.recordID, let type = row.record.sobjectType else { return false }
         if (row.record[field]?.displayText ?? "") == text { return true }
+        return await saveField(text, field: field, sobject: type, id: id) != nil
+    }
+
+    /// Saves text for one field of a record, and updates every tab's results to show the value
+    /// Salesforce saved. Returns that value, or nil if the change couldn't be saved.
+    func saveField(_ text: String, field: String, sobject type: String, id: String) async -> JSONValue? {
+        guard let client, canChangeData else { return nil }
         let tab = currentTab
         isSaving = true
         defer { isSaving = false }
@@ -53,13 +60,38 @@ extension ExplorerModel {
             }
             tab.statusText = saved == value ? "Updated \(field) on \(id)" : "Updated \(field) on \(id); Salesforce saved \(saved.displayText ?? "an empty value")"
             await refreshAPIUsage()
-            return true
+            return saved
         } catch {
             tab.statusText = ""
             self.error = DisplayedError("Unable to update \(field)", error)
             await refreshAPIUsage()
-            return false
+            return nil
         }
+    }
+
+    // MARK: Record inspector
+
+    /// Shows a results row's record in the inspector's Record tab, replacing any records
+    /// followed there.
+    func inspectRecord(in row: ResultRow, api: SalesforceAPI) {
+        guard let id = row.recordID, let type = row.record.sobjectType else { return }
+        let record = RecordReference(sobject: type, id: id, api: api)
+        if inspectedRecords != [record] {
+            inspectedRecords = [record]
+        }
+    }
+
+    /// Every field of a record, and its SObject's describe.
+    func fetchRecord(_ record: RecordReference) async throws -> (describe: SObjectDescribe, fields: JSONObject) {
+        guard let client else { throw CancellationError() }
+        let schema = record.api == .tooling ? toolingSchema : dataSchema
+        if record.api == .tooling, !schema.isLoaded {
+            try await schema.load(using: client)
+        }
+        let describe = try await schema.describe(record.sobject)
+        let fields = try await client.record(describe.name, id: record.id, api: record.api)
+        await refreshAPIUsage()
+        return (describe, fields)
     }
 
     /// Restores the checked records from the Recycle Bin. Restored rows are unchecked and show

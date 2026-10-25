@@ -28,6 +28,11 @@ struct SwiftSoqlApp: App {
                 .defaultAppStorage(AppDefaults.store)
         }
         .defaultSize(width: 1200, height: 800)
+        // New windows open centered on their screen, no bigger than it.
+        .defaultWindowPlacement { _, context in
+            let screen = context.defaultDisplay.visibleRect.size
+            return WindowPlacement(.center, size: CGSize(width: min(1200, screen.width), height: min(800, screen.height)))
+        }
         .commands {
             CommandGroup(after: .appInfo) {
                 Button("Check for Updates…") { updater.checkForUpdates(nil) }

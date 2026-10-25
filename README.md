@@ -5,10 +5,12 @@ A Mac app for exploring Salesforce orgs, written in SwiftUI. It's a port of Simo
 
 - **Queries:** SOQL and SOSL with syntax coloring, error checking against your org's schema, and
   completions; tabs, each on the data API or the Tooling API (⌃⌘T); query plans; formatting; recent and pinned queries.
-- **Results:** sort, edit in place (checkboxes, picklist menus, date pickers), create and clone
+- **Results:** filter the loaded rows as you type, hide and reorder columns, sort, edit in place (checkboxes, picklist menus, date pickers), create and clone
   records (⌃⌘N, or right-click a row), delete and restore
   records, open them in Salesforce, view them as JSON, and export to CSV or JSON (large CSV
   exports use the Bulk API).
+- **Record inspector:** the inspector's Record tab shows every field of the selected row's
+  record, with labels; edit fields there, and follow lookups to related records.
 - **Production guard:** each window shows what kind of org it's connected to (production,
   sandbox, Developer Edition, scratch or trial). Production windows open read-only, with no edits,
   deletes, imports or anonymous Apex until you click the padlock in the toolbar.

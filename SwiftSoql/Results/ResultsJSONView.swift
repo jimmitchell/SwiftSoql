@@ -12,13 +12,13 @@ struct ResultsJSONView: View {
 
     /// Changes when the rows or their order do.
     private var contentKey: String {
-        "\(resultSet.id) \(resultSet.rows.count) \(resultSet.sortOrder.map { "\($0.column) \($0.order == .forward)" })"
+        "\(resultSet.id) \(resultSet.rows.count) \(resultSet.filter) \(resultSet.sortOrder.map { "\($0.column) \($0.order == .forward)" })"
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            if resultSet.rows.count > Self.rowLimit {
-                Text("Showing the first \(Self.rowLimit.formatted()) of \(resultSet.rows.count.formatted()) loaded rows. Export JSON writes them all.")
+            if resultSet.visibleRows.count > Self.rowLimit {
+                Text("Showing the first \(Self.rowLimit.formatted()) of \(resultSet.visibleRows.count.formatted()) rows. Export JSON writes every loaded row.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -29,7 +29,7 @@ struct ResultsJSONView: View {
             JSONTextView(text: text)
         }
         .task(id: contentKey) {
-            text = ResultsExport.json(resultSet.rows.prefix(Self.rowLimit).map(\.record))
+            text = ResultsExport.json(resultSet.visibleRows.prefix(Self.rowLimit).map(\.record))
         }
     }
 }
