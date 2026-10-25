@@ -67,6 +67,15 @@ struct FileCommands: Commands {
             }
             .keyboardShortcut("o")
             .disabled(model?.isConnected != true)
+
+            Button("Import CSV…") {
+                guard let model else { return }
+                ImportPanel.chooseFile { url in
+                    Task { await model.beginImport(of: url) }
+                }
+            }
+            .keyboardShortcut("i", modifiers: [.command, .shift])
+            .disabled(model?.isConnected != true || model?.csvImport != nil)
         }
         CommandGroup(replacing: .saveItem) {
             Button(model?.workspace == .apex ? "Save Apex…" : "Save Query…") {

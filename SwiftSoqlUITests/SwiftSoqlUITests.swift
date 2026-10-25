@@ -270,6 +270,76 @@ final class SwiftSoqlUITests: XCTestCase {
         XCTAssertTrue(waitForStatus("Deleted 2 rows"), "Both Accounts should be deleted")
     }
 
+    /// Imports CSV files into Accounts: an insert with one bad row, an update by Id, and an upsert
+    /// through a Bulk API job; then deletes the Accounts.
+    @MainActor
+    func testImportCSV() throws {
+        try XCTSkipIf(testOrg == nil, "Set SWIFTSOQL_TEST_ORG to run this test")
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["SWIFTSOQL_TEST_WRITES"] == "YES", "Set SWIFTSOQL_TEST_WRITES=YES to let this test create and delete records")
+        let tag = "SwiftSoql UI import \(UUID().uuidString.prefix(8))"
+        let folder = FileManager.default.temporaryDirectory.appending(path: "SwiftSoqlImport-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        /// Writes accounts.csv in its own folder, so the app picks Account from the name.
+        func csvFile(_ step: Int, _ text: String) throws -> String {
+            let url = folder.appending(path: "\(step)/accounts.csv")
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            return url.path
+        }
+        func runImport(_ operation: String, expect summary: String, timeout: TimeInterval = 60) {
+            let start = app.buttons["startImport"]
+            XCTAssertTrue(start.waitForExistence(timeout: 30))
+            let enabled = NSPredicate(format: "isEnabled == true")
+            wait(for: [XCTNSPredicateExpectation(predicate: enabled, object: start)], timeout: 30)
+            start.click()
+            // Not the Touch Bar's copy of the button.
+            let confirm = app.windows.buttons.matching(NSPredicate(format: "label == %@", operation)).firstMatch
+            XCTAssertTrue(confirm.waitForExistence(timeout: 5), "Importing asks first")
+            confirm.click()
+            let result = app.staticTexts["importSummary"]
+            XCTAssertTrue(result.waitForExistence(timeout: timeout), "The import should finish")
+            XCTAssertEqual(result.value as? String, summary)
+            app.buttons["Done"].click()
+        }
+
+        // Insert: the row with a bad number fails without being sent.
+        try launch(extraArguments: ["-importCSV", try csvFile(1, "Name,NumberOfEmployees\n\(tag) A,1\n\(tag) B,2\n\(tag) C,3\n\(tag) X,lots\n")])
+        runImport("Insert", expect: "3 created, 1 failed")
+
+        setQuery("SELECT Id, Name FROM Account WHERE Name LIKE '\(tag)%' ORDER BY Name")
+        runQuery()
+        XCTAssertTrue(waitForStatus("Loaded 3 of 3"))
+        let ids = (0..<3).compactMap { results.outlineRows.element(boundBy: $0).staticTexts.element(boundBy: 0).value as? String }
+        XCTAssertEqual(ids.count, 3)
+        app.terminate()
+
+        // Update by Id; the empty cell leaves B's employees alone.
+        try launch(extraArguments: ["-importCSV", try csvFile(2, "Id,NumberOfEmployees\n\(ids[0]),10\n\(ids[1]),\n")])
+        runImport("Update", expect: "2 updated, 0 failed")
+        app.terminate()
+
+        // Upsert on Id with a Bulk API job: C is updated, D is created.
+        try launch(extraArguments: ["-importCSV", try csvFile(3, "Id,Name,NumberOfEmployees\n\(ids[2]),\(tag) C2,30\n,\(tag) D,4\n"), "-bulkExportThreshold", "1"])
+        let upsert = app.radioButtons["Upsert"]
+        XCTAssertTrue(upsert.waitForExistence(timeout: 30))
+        upsert.click()
+        runImport("Upsert", expect: "1 created, 1 updated, 0 failed", timeout: 300)
+
+        setQuery("SELECT Id, Name, NumberOfEmployees FROM Account WHERE Name LIKE '\(tag)%' ORDER BY Name")
+        runQuery()
+        XCTAssertTrue(waitForStatus("Loaded 4 of 4"), "A, B, C2 and D should exist")
+        let employees = results.textFields.matching(NSPredicate(format: "value IN %@", ["10", "2", "30", "4"]))
+        XCTAssertEqual(employees.count, 4, "The imported employee counts should be saved")
+
+        results.outlineRows.element(boundBy: 0).coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)).rightClick()
+        app.menuItems["Check All Rows"].click()
+        app.buttons["Delete Checked"].click()
+        let confirm = app.buttons.matching(NSPredicate(format: "label == 'Delete'")).firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.click()
+        XCTAssertTrue(waitForStatus("Deleted 4 rows"))
+    }
+
     @MainActor
     func testSchemaDiagramMovesToARelatedSObject() throws {
         try XCTSkipIf(testOrg == nil, "Set SWIFTSOQL_TEST_ORG to run this test")

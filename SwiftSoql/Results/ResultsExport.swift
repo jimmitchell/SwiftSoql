@@ -22,52 +22,12 @@ enum ResultsExport {
     /// would run as a formula prefixed with an apostrophe. Returns the text and the number of
     /// records, not counting the header row, which is left out if `includeHeader` is false.
     static func bulkCSV(_ data: Data, includeHeader: Bool) -> (text: String, records: Int) {
-        var out = ""
-        var records = 0
-        var row: [String] = []
-        var field = ""
-        var inQuotes = false
-        var isHeader = true
-        var chars = String(decoding: data, as: UTF8.self).makeIterator()
-        func endRow() {
-            row.append(field)
-            field = ""
-            defer { row = []; isHeader = false }
-            guard row != [""] else { return }
-            if isHeader {
-                if includeHeader { out += row.map { quoted($0) }.joined(separator: ",") + "\r\n" }
-            } else {
-                records += 1
-                out += row.map { quoted(neutralized($0)) }.joined(separator: ",") + "\r\n"
-            }
+        let rows = CSV.rows(String(decoding: data, as: UTF8.self))
+        var out = includeHeader ? rows.first.map { CSV.line($0) } ?? "" : ""
+        for row in rows.dropFirst() {
+            out += CSV.line(row.map(neutralized))
         }
-        while let c = chars.next() {
-            if inQuotes {
-                if c == "\"" {
-                    // A doubled quote is a literal quote; otherwise the quoted value ends.
-                    var lookahead = chars
-                    if lookahead.next() == "\"" {
-                        field.append("\"")
-                        chars = lookahead
-                    } else {
-                        inQuotes = false
-                    }
-                } else {
-                    field.append(c)
-                }
-            } else if c == "\"" {
-                inQuotes = true
-            } else if c == "," {
-                row.append(field)
-                field = ""
-            } else if c == "\n" || c == "\r\n" {
-                endRow()
-            } else {
-                field.append(c)
-            }
-        }
-        if !field.isEmpty || !row.isEmpty { endRow() }
-        return (out, records)
+        return (out, max(0, rows.count - 1))
     }
 
     /// Text that a spreadsheet would treat as a formula gets a leading apostrophe; numbers,
@@ -106,7 +66,7 @@ enum ResultsExport {
     }
 
     private static func quoted(_ s: String) -> String {
-        "\"" + s.replacingOccurrences(of: "\"", with: "\"\"") + "\""
+        CSV.quoted(s)
     }
 }
 

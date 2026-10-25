@@ -98,6 +98,8 @@ final class ExplorerModel {
     var isConfirmingDelete = false
     /// A record being created, while its form shows.
     var recordDraft: RecordDraft?
+    /// A CSV file being imported, while its sheet shows.
+    var csvImport: CSVImport?
     /// The queries run and pinned in this org.
     let history = QueryHistory()
     /// The fields picked by double-clicking in the schema sidebar, for building a query.

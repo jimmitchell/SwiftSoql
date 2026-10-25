@@ -65,6 +65,9 @@ struct ExplorerView: View {
         }
         .background(ToolbarDisplayModeKeeper())
         .modifier(CodeFileHandling(model: model))
+        .sheet(item: $model.csvImport) { csvImport in
+            ImportSheet(model: model, csvImport: csvImport)
+        }
         .inspector(isPresented: $showInspector) {
             InspectorPanel(model: model)
                 .inspectorColumnWidth(min: 240, ideal: 300, max: 500)

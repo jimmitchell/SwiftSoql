@@ -110,7 +110,8 @@ struct LoginView: View {
     /// `-connect <alias or username>` on the command line connects the first window straight away,
     /// and `-query <soql>` then runs a query, `-executeApex <code>` runs anonymous Apex, `-explainQuery <soql>` shows a query plan, `-formatQuery YES`
     /// formats the query, and
-    /// `-showSchema <sobject>` shows its schema diagram.
+    /// `-showSchema <sobject>` shows its schema diagram, and `-importCSV <path>` opens the import
+    /// sheet for a file.
     private static var launchArgumentHandled = false
 
     private func connectFromLaunchArgument() {
@@ -131,6 +132,9 @@ struct LoginView: View {
             if model.isConnected, let query = defaults.string(forKey: "explainQuery") {
                 model.soql = query
                 await model.explainQuery()
+            }
+            if model.isConnected, let path = defaults.string(forKey: "importCSV") {
+                await model.beginImport(of: URL(filePath: path))
             }
             if model.isConnected, let sobject = defaults.string(forKey: "showSchema") {
                 model.workspace = .schema

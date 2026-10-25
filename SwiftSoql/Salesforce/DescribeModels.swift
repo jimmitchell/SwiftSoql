@@ -8,6 +8,7 @@ nonisolated struct GlobalSObject: Sendable, Identifiable, Hashable {
     let queryable: Bool
     /// Whether the user can create records of this type.
     let createable: Bool
+    let updateable: Bool
     /// The first three characters of this SObject's record Ids, if it has records.
     let keyPrefix: String?
 
@@ -19,6 +20,7 @@ nonisolated struct GlobalSObject: Sendable, Identifiable, Hashable {
         custom = json["custom"]?.bool ?? false
         queryable = json["queryable"]?.bool ?? false
         createable = json["createable"]?.bool ?? false
+        updateable = json["updateable"]?.bool ?? false
         keyPrefix = json["keyPrefix"]?.string
     }
 }

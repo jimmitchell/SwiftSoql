@@ -186,3 +186,36 @@ extension ExplorerModel {
         tab.results?.insertFirst(record)
     }
 }
+
+// MARK: - Importing
+
+extension ExplorerModel {
+    /// Data API SObjects whose records can be created or updated, for imports.
+    var importableSObjects: [String] {
+        dataSchema.sobjects.filter { $0.createable || $0.updateable }.map(\.name)
+    }
+
+    /// Reads a CSV file and opens the import sheet for it. The SObject starts as the one the
+    /// file is named after, if any, or the current results'.
+    func beginImport(of url: URL) async {
+        guard let client else { return }
+        do {
+            let file = try await Task.detached {
+                try ImportFile(name: url.lastPathComponent, text: String(contentsOf: url, encoding: .utf8))
+            }.value
+            let names = importableSObjects
+            // "Account.csv" or "accounts.csv".
+            let stem = url.deletingPathExtension().lastPathComponent.lowercased()
+            let candidates = [stem, stem.hasSuffix("s") ? String(stem.dropLast()) : stem]
+            var sobject = names.first { candidates.contains($0.lowercased()) }
+            if sobject == nil, let results, results.api == .data, results.sobjectTypes.count == 1 {
+                sobject = results.sobjectTypes.first.flatMap { type in names.first { $0 == type } }
+            }
+            let csvImport = CSVImport(file: file, sobject: sobject ?? "", client: client, schema: dataSchema)
+            csvImport.didCallAPI = { [weak self] in await self?.refreshAPIUsage() }
+            self.csvImport = csvImport
+        } catch {
+            self.error = DisplayedError("Unable to read \(url.lastPathComponent)", error)
+        }
+    }
+}

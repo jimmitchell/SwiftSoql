@@ -33,11 +33,15 @@ nonisolated enum SalesforceAPI: String, Sendable {
     case tooling
 }
 
-/// The outcome for one record of a delete or undelete.
+/// The outcome for one record of a save, delete or undelete.
 nonisolated struct SaveResult: Sendable {
     let success: Bool
     /// The errors, if it failed.
     let message: String
+    /// The record's Id, when Salesforce reports it.
+    var id: String?
+    /// Whether an insert or upsert created the record.
+    var created = false
 
     init(success: Bool, message: String) {
         self.success = success
@@ -45,6 +49,8 @@ nonisolated struct SaveResult: Sendable {
     }
 
     init(json: JSONValue) {
+        id = json["id"]?.string
+        created = json["created"]?.bool ?? false
         success = json["success"]?.bool ?? false
         message = (json["errors"]?.array ?? []).map { e in
             let message = e["message"]?.string ?? ""
@@ -204,7 +210,6 @@ actor SalesforceClient {
         _ = try? await send("PATCH", "\(dataPath)/jobs/query/\(Self.pathEncoded(jobID))", body: .object(body))
     }
 
-    /// Changes fields on a record. A null value clears the field.
     /// Creates a record and returns its Id.
     func create(_ sobject: String, fields: JSONObject) async throws -> String {
         let json = try await send("POST", "\(dataPath)/sobjects/\(Self.pathEncoded(sobject))", body: .object(fields))
@@ -223,6 +228,7 @@ actor SalesforceClient {
         return object
     }
 
+    /// Changes fields on a record. A null value clears the field.
     func update(_ sobject: String, id: String, fields: JSONObject) async throws {
         _ = try await send("PATCH", "\(dataPath)/sobjects/\(Self.pathEncoded(sobject))/\(Self.pathEncoded(id))", body: .object(fields))
     }
@@ -235,6 +241,97 @@ actor SalesforceClient {
             URLQueryItem(name: "allOrNone", value: "false"),
         ])
         return (json.array ?? []).map(SaveResult.init)
+    }
+
+    /// The most records one sObject Collections request takes.
+    static let saveBatchLimit = 200
+
+    /// Inserts, updates or upserts up to 200 records with sObject Collections. Each record
+    /// succeeds or fails on its own, and the results are in the same order as `records`. Upserts
+    /// find existing records by `matchField`.
+    func save(_ records: [JSONObject], sobject: String, operation: ImportOperation, matchField: String = "Id") async throws -> [SaveResult] {
+        var attributes = JSONObject()
+        attributes["type"] = .string(sobject)
+        var object = JSONObject()
+        object["allOrNone"] = .bool(false)
+        object["records"] = .array(records.map { record in
+            var typed = JSONObject()
+            typed["attributes"] = .object(attributes)
+            for key in record.keys { typed[key] = record[key] }
+            return .object(typed)
+        })
+        let body = JSONValue.object(object)
+        let json: JSONValue
+        switch operation {
+        case .insert:
+            json = try await send("POST", "\(dataPath)/composite/sobjects", body: body)
+        case .update:
+            json = try await send("PATCH", "\(dataPath)/composite/sobjects", body: body)
+        case .upsert:
+            json = try await send("PATCH", "\(dataPath)/composite/sobjects/\(Self.pathEncoded(sobject))/\(Self.pathEncoded(matchField))", body: body)
+        }
+        return (json.array ?? []).map { json in
+            var result = SaveResult(json: json)
+            if operation == .insert { result.created = result.success }
+            return result
+        }
+    }
+
+    // MARK: Bulk API 2.0 ingest
+
+    /// Opens a Bulk API 2.0 ingest job for CSV with LF line endings and returns its Id.
+    func startIngestJob(sobject: String, operation: ImportOperation, matchField: String) async throws -> String {
+        var body = JSONObject()
+        body["object"] = .string(sobject)
+        body["operation"] = .string(operation.rawValue)
+        if operation == .upsert {
+            body["externalIdFieldName"] = .string(matchField)
+        }
+        body["contentType"] = .string("CSV")
+        body["columnDelimiter"] = .string("COMMA")
+        body["lineEnding"] = .string("LF")
+        let json = try await send("POST", "\(dataPath)/jobs/ingest", body: .object(body))
+        guard let id = json["id"]?.string else {
+            throw SalesforceError(statusCode: 200, errorCode: "", message: "Salesforce didn't return a Bulk API job Id.")
+        }
+        return id
+    }
+
+    /// Uploads a job's CSV, then tells Salesforce to start processing it.
+    func uploadIngestData(_ jobID: String, csv: Data) async throws {
+        _ = try await sendRaw("PUT", "\(dataPath)/jobs/ingest/\(Self.pathEncoded(jobID))/batches", body: .csv(csv))
+        try await setIngestState(jobID, "UploadComplete")
+    }
+
+    func abortIngestJob(_ jobID: String) async {
+        try? await setIngestState(jobID, "Aborted")
+    }
+
+    private func setIngestState(_ jobID: String, _ state: String) async throws {
+        var body = JSONObject()
+        body["state"] = .string(state)
+        _ = try await send("PATCH", "\(dataPath)/jobs/ingest/\(Self.pathEncoded(jobID))", body: .object(body))
+    }
+
+    /// An ingest job's state (Open, UploadComplete, InProgress, JobComplete, Failed or Aborted),
+    /// the records processed and failed so far, and its error message if it failed.
+    func ingestStatus(_ jobID: String) async throws -> (state: String, processed: Int, failed: Int, error: String?) {
+        let json = try await send("GET", "\(dataPath)/jobs/ingest/\(Self.pathEncoded(jobID))")
+        return (json["state"]?.string ?? "", json["numberRecordsProcessed"]?.int ?? 0, json["numberRecordsFailed"]?.int ?? 0, json["errorMessage"]?.string)
+    }
+
+    enum IngestResults: String {
+        /// Rows that worked, with sf__Id and sf__Created columns first.
+        case successful = "successfulResults"
+        /// Rows that failed, with sf__Id and sf__Error columns first.
+        case failed = "failedResults"
+        /// Rows that weren't processed, e.g. because the job was aborted.
+        case unprocessed = "unprocessedrecords"
+    }
+
+    /// One kind of a finished ingest job's results, as CSV.
+    func ingestResults(_ jobID: String, _ kind: IngestResults) async throws -> Data {
+        try await sendRaw("GET", "\(dataPath)/jobs/ingest/\(Self.pathEncoded(jobID))/\(kind.rawValue)", accept: "text/csv").0
     }
 
     /// Runs anonymous Apex and returns the outcome with its debug log.
@@ -279,8 +376,14 @@ actor SalesforceClient {
         try await send("GET", path, query: query)
     }
 
+    /// A request's body: JSON, or CSV for a Bulk API upload.
+    private enum RequestBody {
+        case json(JSONValue)
+        case csv(Data)
+    }
+
     private func send(_ method: String, _ path: String, query: [URLQueryItem] = [], body: JSONValue? = nil, headers: [String: String] = [:]) async throws -> JSONValue {
-        let (data, response) = try await sendRaw(method, path, query: query, body: body, headers: headers)
+        let (data, response) = try await sendRaw(method, path, query: query, body: body.map(RequestBody.json), headers: headers)
         if data.isEmpty { return .null }
         guard let json = try? JSONValue.parse(data) else {
             throw SalesforceError(statusCode: response.statusCode, errorCode: "", message: "Salesforce returned a response that isn't valid JSON.")
@@ -290,7 +393,7 @@ actor SalesforceClient {
 
     /// Sends a request and returns the body as it came, trying once more with a fresh session if
     /// the old one has expired. Throws for responses other than 2xx.
-    private func sendRaw(_ method: String, _ path: String, query: [URLQueryItem] = [], body: JSONValue? = nil, headers: [String: String] = [:], accept: String = "application/json") async throws -> (Data, HTTPURLResponse) {
+    private func sendRaw(_ method: String, _ path: String, query: [URLQueryItem] = [], body: RequestBody? = nil, headers: [String: String] = [:], accept: String = "application/json") async throws -> (Data, HTTPURLResponse) {
         do {
             return try await sendOnce(method, path, query: query, body: body, headers: headers, accept: accept)
         } catch let error as SalesforceError where error.isInvalidSession {
@@ -303,7 +406,7 @@ actor SalesforceClient {
         s.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))) ?? s
     }
 
-    private func sendOnce(_ method: String, _ path: String, query: [URLQueryItem], body: JSONValue?, headers: [String: String], accept: String) async throws -> (Data, HTTPURLResponse) {
+    private func sendOnce(_ method: String, _ path: String, query: [URLQueryItem], body: RequestBody?, headers: [String: String], accept: String) async throws -> (Data, HTTPURLResponse) {
         guard var components = URLComponents(url: session.instanceURL, resolvingAgainstBaseURL: false) else {
             throw URLError(.badURL)
         }
@@ -320,9 +423,15 @@ actor SalesforceClient {
         for (name, value) in headers {
             request.setValue(value, forHTTPHeaderField: name)
         }
-        if let body {
+        switch body {
+        case .json(let json)?:
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = Data(body.serialized.utf8)
+            request.httpBody = Data(json.serialized.utf8)
+        case .csv(let data)?:
+            request.setValue("text/csv", forHTTPHeaderField: "Content-Type")
+            request.httpBody = data
+        case nil:
+            break
         }
 
         let (data, response) = try await urlSession.data(for: request)
