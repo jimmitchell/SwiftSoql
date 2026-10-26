@@ -75,3 +75,68 @@ Heads-up: changing the registered default also turns it off for **existing** use
 setting. Anyone who explicitly switched it on keeps it on. If existing users should keep their current
 behavior, that needs a one-time migration (e.g. write `true` for users upgrading from a version before this
 change).
+
+See section 3: once describe-all is optimized, it may be fine to leave it on by default.
+
+## 3. Describe-all crashes the app on large orgs
+
+Seen on a real org with many SObjects and fields. **Crash report to come; read it first** to confirm which
+cause below is the real one. Everything here is from reading the code, not profiling.
+
+### Likely causes, most likely first
+
+1. **Memory: every full describe is kept, for every object.**
+   - `SchemaCatalog.describeAll` (`SwiftSoql/Schema/SchemaCatalog.swift`) stores a complete `SObjectDescribe`
+     per object, including the raw describe JSON.
+   - `SObjectDescribe.pruned` (`DescribeModels.swift`) only drops empty properties; picklist values,
+     dependent-picklist `validFor` data, etc. are all kept.
+   - Each JSON value is its own small allocation, so in-memory size is several times the download size.
+   - Large orgs with managed packages: 3,000–5,000 SObjects, many generated (`*Share`, `*History`, `*Feed`,
+     `*ChangeEvent`). Can reach gigabytes.
+   - Three 25-object composite requests in flight at once; each response is copied to `[UInt8]` and parsed in
+     full before pruning, so memory spikes.
+2. **The sidebar builds a row for every field of every described object.**
+   - `SchemaOutline.Coordinator.update` (`SchemaSidebar.swift`) calls `children(of:)` for each newly described
+     object and `reloadItem`s it, even when collapsed.
+   - With describe-all that's hundreds of thousands of `Node` NSObjects, created on the main thread.
+   - A filter or sort change rebuilds all of them, sorting fields again when sort is on.
+3. **Every describe that arrives triggers app-wide recalculation on the main thread.**
+   - `describes` is observed, so every view that called `cachedDescribe` redraws on each insert, including
+     every results-table cell (via `editableField`).
+   - `SchemaSidebar.body` rebuilds `describedNames` by checking every SObject on each update.
+   - With filter text entered, `ExplorerModel.filteredSObjects` runs `localizedCaseInsensitiveContains` over
+     every field of every described object on each keystroke and each new describe.
+4. **Each window has its own catalogs**, so two windows on one org hold two full copies.
+
+### Fixes, in order
+
+- [ ] **Keep a small field-name index for describe-all.** The sidebar filter only needs field names: store
+      e.g. `[sobject: [fieldName]]` for background describes. Keep full `SObjectDescribe`s only for objects
+      expanded, queried or edited, with a size limit on that cache. Build the index inside `SalesforceClient`
+      so the full response is freed straight away. Biggest single win.
+- [ ] **Skip objects nobody needs.** Describe only queryable ones (`allQueryableSObjects` exists); consider
+      skipping `*Share`, `*History`, `*Feed`, `*ChangeEvent`. Can halve the work.
+- [ ] **Save the index to disk between launches**, per org + API version. Refresh with `If-Modified-Since`
+      (describe supports it, including as a composite subrequest header), so reconnecting costs almost
+      nothing and uses far fewer API requests.
+- [ ] **Limit memory spikes:** one batch at a time, or fewer than 25 describes per request.
+- [ ] **Less main-thread work:**
+  - Create sidebar field nodes only when an object is expanded.
+  - Make `describes` `@ObservationIgnored`; publish one change counter per round of batches.
+  - Keep the field-name index lowercased so filtering needs no locale-aware comparison; debounce the
+    filter field.
+- [ ] **Share one schema catalog per org across windows.**
+
+The first and fifth items are the core changes; together they should make describe-all a small background
+task that doesn't block the interface.
+
+### What to look for in the crash report
+
+- **Exception type:**
+  - out-of-memory (`EXC_RESOURCE`, a jetsam/memory report) → cause 1;
+  - `EXC_BAD_ACCESS` or an `NSInternalInconsistencyException` mentioning `NSOutlineView` → cause 2;
+  - a hang / force-quit report → main-thread work (causes 2 and 3).
+- **Crashed thread's stack:** look for `JSONParser`, `SObjectDescribe.init`,
+  `SchemaOutline.Coordinator.update` or `filteredSObjects`.
+- **Context:** was filter text entered when it crashed? How many SObject types does the org have (the
+  status bar shows "Connected, N SObject types")?
