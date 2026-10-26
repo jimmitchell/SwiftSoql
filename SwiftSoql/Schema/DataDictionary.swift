@@ -1,21 +1,49 @@
 import Foundation
+import UniformTypeIdentifiers
 
 /// A data dictionary: every field of some SObjects, with the details admins get asked for, as
-/// CSV or Markdown.
+/// CSV, Markdown or an Excel workbook.
 nonisolated enum DataDictionary {
     enum Format: String, CaseIterable {
         case csv
         case markdown
+        case xlsx
 
-        var title: String { self == .csv ? "CSV" : "Markdown" }
-        var fileExtension: String { self == .csv ? "csv" : "md" }
+        var title: String {
+            switch self {
+            case .csv: "CSV"
+            case .markdown: "Markdown"
+            case .xlsx: "Excel"
+            }
+        }
+
+        var fileExtension: String {
+            switch self {
+            case .csv: "csv"
+            case .markdown: "md"
+            case .xlsx: "xlsx"
+            }
+        }
+
+        var contentType: UTType {
+            switch self {
+            case .csv: .commaSeparatedText
+            case .markdown: UTType(filenameExtension: "md") ?? .plainText
+            case .xlsx: UTType("org.openxmlformats.spreadsheetml.sheet") ?? .spreadsheet
+            }
+        }
     }
 
     static let columns = ["SObject", "Field", "Label", "Type", "Required", "Unique", "External Id", "Custom", "Help Text", "Picklist Values", "Formula"]
 
+    static func data(_ describes: [SObjectDescribe], format: Format) -> Data {
+        format == .xlsx ? workbook(describes) : Data(text(describes, format: format).utf8)
+    }
+
+    /// The CSV or Markdown text of a data dictionary.
     static func text(_ describes: [SObjectDescribe], format: Format) -> String {
         switch format {
-        case .csv:
+        case .csv, .xlsx:
             // Help text, picklist values and formulas come from the org, so text a spreadsheet
             // would run as a formula gets a leading apostrophe.
             CSV.line(columns) + describes.flatMap { describe in
@@ -59,6 +87,20 @@ nonisolated enum DataDictionary {
             break
         }
         return field.type
+    }
+
+    /// A workbook with an Objects sheet linking to a sheet of fields for each SObject.
+    private static func workbook(_ describes: [SObjectDescribe]) -> Data {
+        let names = XLSX.sheetNames(["Objects"] + describes.map(\.name))
+        let objects = XLSX.Sheet(name: names[0], header: ["SObject", "Label", "Custom", "Fields"], rows: zip(describes, names.dropFirst()).map { describe, sheet in
+            [.link(describe.name, sheet: sheet), .text(describe.json["label"]?.string ?? ""), .text(describe.json["custom"]?.bool == true ? "Yes" : ""), .number(describe.fields.count)]
+        })
+        let sheets = zip(describes, names.dropFirst()).map { describe, sheet in
+            XLSX.Sheet(name: sheet, header: Array(columns.dropFirst()), rows: describe.fields.map { field in
+                values(describe, field).dropFirst().map(XLSX.Cell.text)
+            })
+        }
+        return XLSX.workbook([objects] + sheets)
     }
 
     private static func markdown(_ describe: SObjectDescribe) -> String {

@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// Chooses SObjects and a format, then writes their data dictionary to a file.
 struct DataDictionarySheet: View {
@@ -83,7 +82,7 @@ struct DataDictionarySheet: View {
 
     private func chooseFile() {
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [format == .csv ? .commaSeparatedText : .init(filenameExtension: "md") ?? .plainText]
+        panel.allowedContentTypes = [format.contentType]
         panel.nameFieldStringValue = (chosen.count == 1 ? chosen.first! : "Data Dictionary") + "." + format.fileExtension
         let names = model.dataSchema.sobjects.map(\.name).filter(chosen.contains)
         let format = format

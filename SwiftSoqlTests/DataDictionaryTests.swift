@@ -38,4 +38,16 @@ struct DataDictionaryTests {
         #expect(text.hasPrefix("## Account (`Account`)\n\n| Field | Label | Type | Required | Help Text | Picklist Values |\n| --- | --- | --- | --- | --- | --- |\n"))
         #expect(text.contains("| `AnnualRevenue` | Annual Revenue | currency(18, 0) |  | Yearly \\| total |  |"))
     }
+
+    @Test func workbookHasASheetPerSObject() throws {
+        let files = try XLSXTests.unzip(DataDictionary.data([try describe()], format: .xlsx))
+        let workbook = String(decoding: try #require(files["xl/workbook.xml"]), as: UTF8.self)
+        #expect(workbook.contains("<sheet name=\"Objects\" sheetId=\"1\" r:id=\"rId1\"/><sheet name=\"Account\" sheetId=\"2\" r:id=\"rId2\"/>"))
+        let objects = String(decoding: try #require(files["xl/worksheets/sheet1.xml"]), as: UTF8.self)
+        #expect(objects.contains("location=\"'Account'!A1\""))
+        #expect(objects.contains("<v>5</v>"), "Field count")
+        let account = String(decoding: try #require(files["xl/worksheets/sheet2.xml"]), as: UTF8.self)
+        #expect(account.contains("<t>Field</t>") && !account.contains("<t>SObject</t>"))
+        #expect(account.contains("<t>=HYPERLINK(&quot;http://example.com&quot;)</t>"), "Text isn't neutralized, since cells are text")
+    }
 }
