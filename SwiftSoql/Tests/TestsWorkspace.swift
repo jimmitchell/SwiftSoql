@@ -294,6 +294,8 @@ private struct SourceTextView: NSViewRepresentable {
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSTextView.scrollableTextView()
         let textView = scrollView.documentView as! NSTextView
+        let layoutManager = CoverageLayoutManager()
+        textView.textContainer?.replaceLayoutManager(layoutManager)
         textView.isEditable = false
         textView.isSelectable = true
         textView.usesFindBar = true
@@ -303,21 +305,27 @@ private struct SourceTextView: NSViewRepresentable {
         let width = String(lines.count).count
         let text = NSMutableAttributedString()
         let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        // Wrapped lines continue under the code, not under the line numbers.
+        let gutterWidth = NSAttributedString(string: String(repeating: "0", count: width) + "  ", attributes: [.font: font]).size().width
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.headIndent = gutterWidth
+        layoutManager.gutterWidth = (textView.textContainer?.lineFragmentPadding ?? 0) + gutterWidth
         var targetRange: NSRange?
         for (index, line) in lines.enumerated() {
             let number = index + 1
             let numberText = String(repeating: " ", count: width - String(number).count) + "\(number)  "
             let start = text.length
             text.append(NSAttributedString(string: numberText, attributes: [.font: font, .foregroundColor: NSColor.tertiaryLabelColor]))
-            var attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.textColor]
+            text.append(NSAttributedString(string: String(line) + "\n", attributes: [.font: font, .foregroundColor: NSColor.textColor]))
+            let lineRange = NSRange(location: start, length: text.length - start)
+            text.addAttribute(.paragraphStyle, value: paragraph, range: lineRange)
             if source.covered.contains(number) {
-                attributes[.backgroundColor] = NSColor.systemGreen.withAlphaComponent(0.18)
+                text.addAttribute(.coverage, value: NSColor.systemGreen.withAlphaComponent(0.18), range: lineRange)
             } else if source.uncovered.contains(number) {
-                attributes[.backgroundColor] = NSColor.systemRed.withAlphaComponent(0.18)
+                text.addAttribute(.coverage, value: NSColor.systemRed.withAlphaComponent(0.18), range: lineRange)
             }
-            text.append(NSAttributedString(string: String(line) + "\n", attributes: attributes))
             if number == source.line {
-                targetRange = NSRange(location: start, length: text.length - start)
+                targetRange = lineRange
             }
         }
         textView.textStorage?.setAttributedString(text)
@@ -332,4 +340,31 @@ private struct SourceTextView: NSViewRepresentable {
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {}
+}
+
+private extension NSAttributedString.Key {
+    /// The color behind a line of source, filled across the whole width of the view.
+    static let coverage = NSAttributedString.Key("SwiftSoqlCoverage")
+}
+
+/// Fills each line marked with `.coverage` from the line numbers to the right edge, including
+/// its wrapped continuations, where `.backgroundColor` would color only the characters.
+private final class CoverageLayoutManager: NSLayoutManager {
+    /// Where the code starts in each line fragment; the line numbers to its left stay uncolored.
+    var gutterWidth: CGFloat = 0
+
+    override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
+        super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
+        guard let textStorage else { return }
+        enumerateLineFragments(forGlyphRange: glyphsToShow) { rect, _, _, glyphRange, _ in
+            let index = self.characterIndexForGlyph(at: glyphRange.location)
+            guard index < textStorage.length,
+                  let color = textStorage.attribute(.coverage, at: index, effectiveRange: nil) as? NSColor else { return }
+            var fill = rect.offsetBy(dx: origin.x, dy: origin.y)
+            fill.origin.x += self.gutterWidth
+            fill.size.width -= self.gutterWidth
+            color.setFill()
+            fill.fill(using: .sourceOver)
+        }
+    }
 }
