@@ -45,7 +45,7 @@ with any org.
 If you'd rather not install the CLI, you can log in with the browser instead, once your org has an
 External Client App for SwiftSoql (see below).
 
-Requires macOS 27.
+Requires macOS 15 or later.
 
 ## Logging in with the browser
 
