@@ -250,6 +250,8 @@ private struct UserPicker: View {
     @Environment(\.dismiss) private var dismiss
     @State private var search = ""
     @State private var users: [(id: String, name: String, username: String)] = []
+    /// The search the listed users were found with, so "no match" shows only once it's done.
+    @State private var searched: String?
     @State private var chosen: String?
     @State private var minutes = 60
 
@@ -259,7 +261,6 @@ private struct UserPicker: View {
                 .font(.headline)
             TextField("Name or username", text: $search)
                 .textFieldStyle(.roundedBorder)
-                .onSubmit { Task { users = await model.findUsers(search) } }
             List(users, id: \.id, selection: $chosen) { user in
                 VStack(alignment: .leading) {
                     Text(user.name)
@@ -269,12 +270,31 @@ private struct UserPicker: View {
                 }
             }
             .frame(height: 220)
+            .overlay {
+                if users.isEmpty, searched == search {
+                    Text("No active users match.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            // Searches as you type, once typing pauses, and picks the first match so a search
+            // that finds the one user is ready to start.
+            .task(id: search) {
+                try? await Task.sleep(for: .milliseconds(300))
+                guard !Task.isCancelled else { return }
+                let found = await model.findUsers(search)
+                guard !Task.isCancelled else { return }
+                users = found
+                searched = search
+                if !found.contains(where: { $0.id == chosen }) {
+                    chosen = found.first?.id
+                }
+            }
             Picker("For", selection: $minutes) {
                 ForEach([30, 60, 240, 1440], id: \.self) { Text(LogsWorkspace.duration($0).replacingOccurrences(of: "For ", with: "")).tag($0) }
             }
             .fixedSize()
             HStack {
-                Text("Press Return to search.")
+                Text("Choose whose actions to log.")
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button("Cancel") { dismiss() }
