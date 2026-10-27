@@ -27,6 +27,7 @@ struct SwiftSoqlApp: App {
         WindowGroup(for: WindowOrg.self) { $windowOrg in
             ContentView(windowOrg: $windowOrg)
                 .defaultAppStorage(AppDefaults.store)
+                .background(WindowFrameSaver())
         }
         .defaultSize(width: 1200, height: 800)
         // New windows open centered on their screen, no bigger than it.
