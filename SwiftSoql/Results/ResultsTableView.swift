@@ -822,12 +822,26 @@ private final class LinkCell: NSTableCellView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    private var title = ""
+
     func configure(_ title: String, open: @escaping () -> Void) {
+        self.title = title
+        self.open = open
+        updateTitle()
+    }
+
+    /// The row draws its selection behind its cells as emphasized.
+    override var backgroundStyle: NSView.BackgroundStyle {
+        didSet { updateTitle() }
+    }
+
+    private func updateTitle() {
+        // Link blue is nearly the selection's blue, so a selected row's link takes the selected
+        // text's color instead.
         button.attributedTitle = NSAttributedString(string: title, attributes: [
-            .foregroundColor: NSColor.linkColor,
+            .foregroundColor: backgroundStyle == .emphasized ? NSColor.alternateSelectedControlTextColor : NSColor.linkColor,
             .font: NSFont.systemFont(ofSize: NSFont.systemFontSize),
         ])
-        self.open = open
     }
 
     @objc private func clicked() {
