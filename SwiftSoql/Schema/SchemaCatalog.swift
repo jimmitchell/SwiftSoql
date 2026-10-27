@@ -121,11 +121,13 @@ final class SchemaCatalog {
         return names.compactMap { describes[$0.lowercased()] }
     }
 
-    /// Describes every SObject, a few batches at a time, so the sidebar filter can find fields in
-    /// all of them. SoqlXplorer does the same. Describes the UI asks for go ahead separately.
+    /// Describes every SObject, one batch at a time, so the sidebar filter can find fields in all
+    /// of them. SoqlXplorer does the same. Describes the UI asks for go ahead separately.
+    ///
+    /// This used to run three batches at once in a task group, and 1.8 crashed on a large org
+    /// inside the task machinery as that group finished, so it stays sequential.
     private func describeAll(using client: SalesforceClient) async {
         let names = sobjects.map(\.name)
-        let api = api
         var failures: [String: Int] = [:]
         var batchSize = SalesforceClient.describeBatchLimit
         func remaining() -> [String] {
@@ -137,36 +139,21 @@ final class SchemaCatalog {
         var todo = remaining()
         while !todo.isEmpty, !Task.isCancelled {
             backgroundDescribeProgress = (names.count - todo.count, names.count)
-            let batches = stride(from: 0, to: min(todo.count, batchSize * 3), by: batchSize).map {
-                Array(todo[$0..<min($0 + batchSize, todo.count)])
-            }
-            await withTaskGroup(of: (batch: [String], result: Result<(describes: [SObjectDescribe], failed: [String]), Error>).self) { group in
-                for batch in batches {
-                    group.addTask {
-                        do {
-                            return (batch, .success(try await client.describe(batch: batch, api: api)))
-                        } catch {
-                            return (batch, .failure(error))
-                        }
-                    }
+            let batch = Array(todo.prefix(batchSize))
+            do {
+                let result = try await client.describe(batch: batch, api: api)
+                for describe in result.describes where describes[describe.name.lowercased()] == nil {
+                    describes[describe.name.lowercased()] = describe
                 }
-                for await (batch, result) in group {
-                    switch result {
-                    case .success(let r):
-                        for describe in r.describes where describes[describe.name.lowercased()] == nil {
-                            describes[describe.name.lowercased()] = describe
-                        }
-                        for name in r.failed {
-                            failures[name] = 3
-                        }
-                    case .failure:
-                        // Try again in smaller batches, giving up on an SObject after a few failures.
-                        for name in batch {
-                            failures[name, default: 0] += 1
-                        }
-                        batchSize = max(1, batchSize / 2)
-                    }
+                for name in result.failed {
+                    failures[name] = 3
                 }
+            } catch {
+                // Try again in smaller batches, giving up on an SObject after a few failures.
+                for name in batch {
+                    failures[name, default: 0] += 1
+                }
+                batchSize = max(1, batchSize / 2)
             }
             await didCallAPI()
             todo = remaining()

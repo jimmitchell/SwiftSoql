@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// An org that the Salesforce CLI (`sf`) has credentials for.
 nonisolated struct SFOrg: Sendable, Identifiable, Hashable {
@@ -121,14 +122,18 @@ nonisolated enum SFCLI {
                     continuation.resume(throwing: error)
                     return
                 }
-                // Drain stderr concurrently so a chatty process can't fill the pipe and block.
-                var errData = Data()
-                let errReader = DispatchWorkItem { errData = stderr.fileHandleForReading.readDataToEndOfFile() }
+                // Drain stderr concurrently so a chatty process can't fill the pipe and block. The
+                // mutex hands the data between threads in a way Thread Sanitizer can see.
+                let errData = Mutex(Data())
+                let errReader = DispatchWorkItem {
+                    let data = stderr.fileHandleForReading.readDataToEndOfFile()
+                    errData.withLock { $0 = data }
+                }
                 DispatchQueue.global(qos: .userInitiated).async(execute: errReader)
                 let outData = stdout.fileHandleForReading.readDataToEndOfFile()
                 errReader.wait()
                 process.waitUntilExit()
-                continuation.resume(returning: ProcessOutput(stdout: outData, stderr: errData, exitCode: process.terminationStatus))
+                continuation.resume(returning: ProcessOutput(stdout: outData, stderr: errData.withLock { $0 }, exitCode: process.terminationStatus))
             }
         }
     }
