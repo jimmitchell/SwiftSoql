@@ -100,6 +100,7 @@ struct ExplorerView: View {
                 ToolbarItem(placement: .navigation) {
                     OrgKindBadge(kind: kind)
                 }
+                .withoutSharedBackground()
             }
             if model.isGuarded {
                 ToolbarItem(placement: .navigation) {
@@ -135,6 +136,19 @@ struct ExplorerView: View {
 
 #Preview {
     ContentView(windowOrg: .constant(nil))
+}
+
+private extension ToolbarContent {
+    /// Leaves the item out of the glass background macOS 26 puts behind toolbar items, for one
+    /// that is a label rather than a control.
+    @ToolbarContentBuilder
+    func withoutSharedBackground() -> some ToolbarContent {
+        if #available(macOS 26.0, *) {
+            sharedBackgroundVisibility(.hidden)
+        } else {
+            self
+        }
+    }
 }
 
 /// The kind of org, as a small colored label in the toolbar.
