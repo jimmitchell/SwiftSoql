@@ -27,7 +27,6 @@ struct SwiftSoqlApp: App {
         WindowGroup(for: WindowOrg.self) { $windowOrg in
             ContentView(windowOrg: $windowOrg)
                 .defaultAppStorage(AppDefaults.store)
-                .background(WindowFrameSaver())
         }
         .defaultSize(width: 1200, height: 800)
         // New windows open centered on their screen, no bigger than it.
@@ -89,7 +88,13 @@ struct FileCommands: Commands {
             }
             .disabled(model?.isConnected != true)
         }
+        // Replacing the save items also replaces Close, so it's added back.
         CommandGroup(replacing: .saveItem) {
+            Button("Close") {
+                NSApp.keyWindow?.performClose(nil)
+            }
+            .keyboardShortcut("w")
+
             Button(model?.workspace == .apex ? "Save Apex…" : "Save Query…") {
                 model?.isSavingFile = true
             }

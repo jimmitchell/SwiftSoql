@@ -11,6 +11,7 @@ struct WindowOrg: Codable, Hashable {
 struct ContentView: View {
     @Binding var windowOrg: WindowOrg?
     @State private var model = ExplorerModel()
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Group {
@@ -26,6 +27,9 @@ struct ContentView: View {
         .alert(item: $model.error) { error in
             Alert(title: Text(error.title), message: Text(error.message))
         }
+        .background(ExplorerWindowObserver(isConnected: model.session != nil) {
+            openWindow(value: WindowOrg())
+        })
         .task {
             if let username = windowOrg?.username, !model.isConnected, !model.isConnecting {
                 await model.connect(username: username)
