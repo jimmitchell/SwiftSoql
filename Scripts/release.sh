@@ -13,6 +13,13 @@
 #   - The GitHub CLI, logged in (gh auth login).
 #
 # SKIP_NOTARIZE=1 and SKIP_PUBLISH=1 stop before those steps, for trying the build.
+#
+# Before running it, push main: the release's tag is made from GitHub's main, not the local one.
+#
+# After every release, update the website: swiftsoql/index.html in the jimmitchell.dev repo
+# describes what the app does, and its screenshots show it. Bring them in line with the release,
+# then commit, push and deploy with `npx wrangler deploy` (that repo's README says how to check
+# the deploy). Its download link goes to /releases/latest, so it never needs a version number.
 set -eu
 
 version="${1:?usage: Scripts/release.sh <version> <build>}"
@@ -68,3 +75,4 @@ if [ "${SKIP_PUBLISH:-0}" != 1 ]; then
         --title "SwiftSoql $version" --generate-notes
 fi
 echo "== Done: $out/updates"
+echo "== Now update the SwiftSoql page on jimmitchell.dev for $version and deploy it (see the top of this script)"
