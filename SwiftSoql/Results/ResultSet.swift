@@ -43,12 +43,17 @@ struct ResultSet: Identifiable {
     /// The rows to show: those matching the filter, in table order. Exports use every row.
     var visibleRows: [ResultRow] { filteredRows ?? rows }
 
+    /// Goes up whenever the rows or columns change, so the table can tell without comparing
+    /// every row.
+    private(set) var revision = 0
+
     mutating func setFilter(_ text: String) {
         filter = text
         refilter()
     }
 
     private mutating func refilter() {
+        revision += 1
         let needle = filter.trimmingCharacters(in: .whitespaces)
         guard !needle.isEmpty else {
             filteredRows = nil
@@ -79,8 +84,16 @@ struct ResultSet: Identifiable {
     /// SoqlXplorer). Tooling API results are read-only.
     var isEditable: Bool { api == .data && columns.contains("Id") }
 
+    /// Starting widths for the columns, worked out when rows are added rather than each time the
+    /// table is drawn.
+    private var idealWidths: [String: CGFloat] = [:]
+
     /// A starting width for a column that fits its name and the values in the first rows.
     func idealWidth(for column: String) -> CGFloat {
+        idealWidths[column] ?? 50
+    }
+
+    private func measuredWidth(for column: String) -> CGFloat {
         let path = column.split(separator: ".")
         let longest = rows.prefix(100).reduce(column.count) { longest, row in
             max(longest, row.record.value(atPath: path)?.displayText?.count ?? 0)
@@ -104,6 +117,9 @@ struct ResultSet: Identifiable {
         }
         // A later batch can resolve columns that were null in every earlier row.
         columns = QueryColumns.names(for: rows.map(\.record), isSearchResult: isSearchResult)
+        for column in columns where idealWidths[column] == nil {
+            idealWidths[column] = measuredWidth(for: column)
+        }
         if !sortOrder.isEmpty {
             rows = ResultSortComparator.sorted(rows, by: sortOrder)
         }
@@ -129,6 +145,7 @@ struct ResultSet: Identifiable {
         highlightedRowID = row.id
         // A new record shows even if it doesn't match the filter.
         filteredRows?.insert(row, at: 0)
+        revision += 1
     }
 
     /// Removes deleted rows.
@@ -141,6 +158,7 @@ struct ResultSet: Identifiable {
             rowErrors[id] = nil
         }
         filteredRows?.removeAll { ids.contains($0.id) }
+        revision += 1
     }
 
     /// Records a saved change in every copy of the record: its row, and wherever it appears as a
@@ -156,6 +174,7 @@ struct ResultSet: Identifiable {
             let byID = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
             filteredRows = shown.compactMap { byID[$0.id] }
         }
+        revision += 1
     }
 }
 

@@ -16,12 +16,21 @@ extension ExplorerModel {
         }
     }
 
-    /// The field a results cell shows, if it can be edited: a top-level field the user may
-    /// update, once the row's SObject type has been described.
-    func editableField(_ column: String, of row: ResultRow) -> FieldDescribe? {
-        guard !isLocked, column != "Id", row.recordID != nil, let type = row.record.sobjectType,
-              let field = dataSchema.cachedDescribe(type)?.field(exactly: column), field.updateable else { return nil }
-        return field
+    /// The fields of results that can be edited, by SObject type and then column: top-level
+    /// fields the user may update, once their SObject type has been described. Worked out once
+    /// per table rather than per cell, so cells don't each watch the schema.
+    func editableFields(in results: ResultSet) -> [String: [String: FieldDescribe]] {
+        guard !isLocked, results.isEditable else { return [:] }
+        var fields: [String: [String: FieldDescribe]] = [:]
+        for type in results.sobjectTypes {
+            guard let describe = dataSchema.cachedDescribe(type) else { continue }
+            for column in results.columns where column != "Id" {
+                if let field = describe.field(exactly: column), field.updateable {
+                    fields[type, default: [:]][column] = field
+                }
+            }
+        }
+        return fields
     }
 
     /// Saves text typed into a results cell to the record, and updates the results to show the

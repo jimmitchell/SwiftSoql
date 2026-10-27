@@ -41,7 +41,7 @@ final class SwiftSoqlUITests: XCTestCase {
 
     @MainActor private var editor: XCUIElement { app.textViews["soqlEditor"] }
     /// SwiftUI tables appear to UI tests as outlines.
-    @MainActor private var results: XCUIElement { app.outlines.matching(identifier: "results").firstMatch }
+    @MainActor private var results: XCUIElement { app.tables.matching(identifier: "results").firstMatch }
 
     /// Cell text is exposed as the element's value.
     @MainActor
@@ -84,7 +84,7 @@ final class SwiftSoqlUITests: XCTestCase {
         runQuery()
         XCTAssertTrue(waitForStatus("Loaded"), "The query should load rows")
         XCTAssertTrue(results.waitForExistence(timeout: 10))
-        let rows = results.outlineRows
+        let rows = results.tableRows
         try XCTSkipIf(rows.count < 2, "Needs at least two users to check sorting")
         let firstName = rows.element(boundBy: 0).staticTexts.element(boundBy: 1).value as? String
 
@@ -201,12 +201,12 @@ final class SwiftSoqlUITests: XCTestCase {
         filter.click()
         filter.typeText("no account has this text")
         XCTAssertEqual(app.staticTexts["filterCount"].value as? String, "0 of 3")
-        XCTAssertEqual(results.outlineRows.count, 0)
+        XCTAssertEqual(results.tableRows.count, 0)
         filter.typeKey("a", modifierFlags: .command)
         filter.typeKey(.delete, modifierFlags: [])
-        XCTAssertEqual(results.outlineRows.count, 3, "Clearing the filter shows every row")
+        XCTAssertEqual(results.tableRows.count, 3, "Clearing the filter shows every row")
 
-        results.outlineRows.element(boundBy: 0).coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)).click()
+        results.tableRows.element(boundBy: 0).coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)).click()
         XCTAssertTrue(text("Account Name", in: app.windows.firstMatch).waitForExistence(timeout: 30), "The Record tab lists the record's fields by label")
         XCTAssertTrue(text("Created Date", in: app.windows.firstMatch).exists, "Fields the query didn't select are shown too")
 
@@ -480,7 +480,7 @@ final class SwiftSoqlUITests: XCTestCase {
         runQuery()
         XCTAssertTrue(waitForStatus("Loaded 1 of 1"), "The new Account should be found")
         // Right-click the read-only Id cell; an editable cell shows its text field's menu.
-        let idCell = { self.results.outlineRows.element(boundBy: 0).coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)) }
+        let idCell = { self.results.tableRows.element(boundBy: 0).coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)) }
         idCell().rightClick()
         app.menuItems["Clone Record…"].click()
         XCTAssertTrue(nameField.waitForExistence(timeout: 30), "Cloning opens the form")
@@ -493,7 +493,7 @@ final class SwiftSoqlUITests: XCTestCase {
         // Name is editable, so its cells are text fields.
         let copyCell = results.textFields.matching(NSPredicate(format: "value == %@", "\(name) copy")).firstMatch
         XCTAssertTrue(copyCell.waitForExistence(timeout: 10), "The copy is added to the results")
-        XCTAssertEqual(results.outlineRows.count, 2)
+        XCTAssertEqual(results.tableRows.count, 2)
 
         idCell().rightClick()
         app.menuItems["Check All Rows"].click()
@@ -544,7 +544,7 @@ final class SwiftSoqlUITests: XCTestCase {
         setQuery("SELECT Id, Name FROM Account WHERE Name LIKE '\(tag)%' ORDER BY Name")
         runQuery()
         XCTAssertTrue(waitForStatus("Loaded 3 of 3"))
-        let ids = (0..<3).compactMap { results.outlineRows.element(boundBy: $0).staticTexts.element(boundBy: 0).value as? String }
+        let ids = (0..<3).compactMap { results.tableRows.element(boundBy: $0).staticTexts.element(boundBy: 0).value as? String }
         XCTAssertEqual(ids.count, 3)
         app.terminate()
 
@@ -565,7 +565,7 @@ final class SwiftSoqlUITests: XCTestCase {
         XCTAssertTrue(waitForStatus("Loaded 4 of 4"), "A, B, C2 and D should exist")
         let employees = results.textFields.matching(NSPredicate(format: "value IN %@", ["10", "2", "30", "4"]))
         XCTAssertEqual(employees.count, 4, "The imported employee counts should be saved")
-        let allIDs = (0..<4).compactMap { results.outlineRows.element(boundBy: $0).staticTexts.element(boundBy: 0).value as? String }
+        let allIDs = (0..<4).compactMap { results.tableRows.element(boundBy: $0).staticTexts.element(boundBy: 0).value as? String }
         XCTAssertEqual(allIDs.count, 4)
         app.terminate()
 
